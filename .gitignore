@@ -1,0 +1,23 @@
+# ---- 用户数据（绝对不能提交！里面有你自己的学生名单和积分记录）----
+user/
+
+# ---- PyInstaller 打包产物 ----
+build/
+dist/
+*.spec
+
+# ---- Python 缓存 ----
+__pycache__/
+*.pyc
+*.pyo
+
+# ---- IDE ----
+.vscode/
+.idea/
+
+# ---- 系统文件 ----
+Thumbs.db
+.DS_Store
+
+# ---- 日志 ----
+*.log
