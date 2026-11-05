@@ -62,7 +62,7 @@ cd PickOS
 
 pip install -r requirements.txt
 
-python PickOS 班级管理系统v6.3.0.135源代码.pyw
+python main.pyw
 
 ```
 
@@ -92,9 +92,9 @@ python PickOS 班级管理系统v6.3.0.135源代码.pyw
 
 PickOS/
 
-├── PickOS 班级管理系统v6.3.0.135源代码.pyw              # 主程序（单文件）
+├── main.pyw              # 主程序（单文件）
 
-├── PickOS班级管理系统批量打包程序.bat             # Windows 打包脚本
+├── build.bat             # Windows 打包脚本
 
 ├── requirements.txt      # 依赖清单
 
