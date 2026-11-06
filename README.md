@@ -62,7 +62,7 @@ cd PickOS
 
 pip install -r requirements.txt
 
-python main.pyw
+python PickOS.pyw
 
 ```
 
@@ -92,7 +92,7 @@ python main.pyw
 
 PickOS/
 
-├── main.pyw              # 主程序（单文件）
+├── PickOS.pyw              # 主程序（单文件）
 
 ├── build.bat             # Windows 打包脚本
 
