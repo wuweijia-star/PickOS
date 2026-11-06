@@ -12,6 +12,7 @@
 
 !\[License](https://img.shields.io/badge/License-GPLv3-orange)
 
+[![Download](https://img.shields.io/github/v/release/wuweijia-star/PickOS?label=下载最新版&style=for-the-badge&color=2ea44f)](https://github.com/wuweijia-star/PickOS/releases/latest)
 
 
 \## ✨ 功能简介
