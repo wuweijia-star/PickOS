@@ -62,10 +62,10 @@ echo.
 echo [2/6] 检查依赖...
 
 :: ★ 基础依赖：pypi 失败自动回退清华镜像
-%PYTHON_CMD% -m pip install PyQt6 openpyxl pandas psutil lunardate -i https://pypi.org/simple/
+%PYTHON_CMD% -m pip install PyQt6 openpyxl pandas psutil lunardate certifi -i https://pypi.org/simple/
 if errorlevel 1 (
     echo [提示] pypi 失败，改用清华镜像重试...
-    %PYTHON_CMD% -m pip install PyQt6 openpyxl pandas psutil lunardate -i https://pypi.tuna.tsinghua.edu.cn/simple
+    %PYTHON_CMD% -m pip install PyQt6 openpyxl pandas psutil lunardate certifi -i https://pypi.tuna.tsinghua.edu.cn/simple
 )
 if errorlevel 1 (
     echo [错误] 基础依赖安装失败
@@ -150,6 +150,7 @@ echo.
     --collect-all qfluentwidgets ^
     --collect-data pandas ^
     --collect-data numpy ^
+    --collect-data certifi ^
     --collect-submodules openpyxl ^
     --collect-submodules psutil ^
     --hidden-import=lunardate ^
