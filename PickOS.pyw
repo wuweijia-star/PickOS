@@ -23,12 +23,18 @@ import hashlib
 from PyQt6.QtGui import QIcon, QPixmap
 import os
 import json
+import ssl
+import certifi
 import math
 import time
 import random
 import shutil
 import glob
 import subprocess
+import urllib.request
+import zipfile
+import re
+import threading
 from datetime import datetime
 from datetime import timedelta
 import pandas as pd
@@ -53,6 +59,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import QSystemTrayIcon, QMenu
 from PyQt6.QtCore import QUrl
+from PyQt6.QtCore import QMetaObject, Q_ARG, pyqtSlot
 from qfluentwidgets import (
     FluentWindow, NavigationItemPosition, FluentIcon,
     setTheme, Theme, setThemeColor, InfoBar, InfoBarPosition,
@@ -77,7 +84,7 @@ CLASS_LIST_FILE = os.path.join(DATA_DIR, "班级名单.xlsx")
 DATA_CSV = os.path.join(DATA_DIR, "班级积分记录.csv")
 INSTALL_TIME_STR = "2026-05-01 18:00:00"
 INSTALL_TIMESTAMP = time.mktime(time.strptime(INSTALL_TIME_STR, "%Y-%m-%d %H:%M:%S"))
-SYSTEM_VERSION = "v6.3.0.135"
+SYSTEM_VERSION = "v6.4.0.110"
 
 DIALOG_STYLE = """
     QDialog {
@@ -234,6 +241,371 @@ DIALOG_STYLE = """
         height: 0px;
     }
 """
+
+# ======================== 自动更新系统 ========================
+CURRENT_VERSION = "v6.4.0.110"
+GITHUB_API_URL = "https://api.github.com/repos/wuweijia-star/PickOS/releases/latest"
+
+class UpdateManager:
+    import ssl
+    import certifi
+    @staticmethod
+    def parse_version(v_str):
+        """将 v6.3.0.135 转换为 (6, 3, 0, 135) 用于比较"""
+        try:
+            return tuple(map(int, re.findall(r'\d+', v_str)))
+        except:
+            return (0,)
+
+    @staticmethod
+    def check_update():
+        """返回 (是否有更新, 最新版本号, 更新日志, 下载链接)"""
+        try:
+            # 1. 构造 SSL 上下文，加载 certifi 提供的根证书
+            context = ssl.create_default_context(cafile=certifi.where())
+            
+            req = urllib.request.Request(GITHUB_API_URL, headers={'User-Agent': 'PickOS-Updater'})
+            # 2. 传入 context
+            with urllib.request.urlopen(req, timeout=10, context=context) as response:
+                data = json.loads(response.read().decode('utf-8'))
+                
+            latest_version = data.get("tag_name", "v0.0.0")
+            changelog = data.get("body", "暂无更新日志")
+            
+            # 比较版本
+            if UpdateManager.parse_version(latest_version) > UpdateManager.parse_version(CURRENT_VERSION):
+                # ===== 优先找 .exe 安装包 =====
+                installer_url = None
+                fallback_zip = None
+                for asset in data.get("assets", []):
+                    name = asset["name"].lower()
+                    url = asset["browser_download_url"]
+                    # 安装包判定：后缀 .exe 且文件名含 setup/installer/install/win64
+                    if name.endswith(".exe") and any(
+                        k in name for k in ("setup", "installer", "install", "win64")
+                    ):
+                        installer_url = url
+                        break
+                    # 记录一下 zip 作为兜底信息
+                    if "win64.zip" in name:
+                        fallback_zip = url
+
+                download_url = installer_url or fallback_zip
+                if download_url:
+                    if installer_url:
+                        print(f"[更新] 找到安装包：{installer_url}")
+                    else:
+                        print(f"[更新] ⚠️ 未找到 .exe 安装包，使用 zip 兜底")
+                    return True, latest_version, changelog, download_url
+            return False, latest_version, changelog, None
+        except Exception as e:
+            print(f"检查更新失败: {e}")
+            err_msg = str(e)
+            # 如果包含 SSL 错误，尝试忽略证书重试
+            if "SSL" in err_msg or "CERTIFICATE" in err_msg:
+                try:
+                    print("⚠️ 证书验证失败，尝试忽略 SSL 验证重试...")
+                    context = ssl._create_unverified_context()
+                    req = urllib.request.Request(GITHUB_API_URL, headers={'User-Agent': 'PickOS-Updater'})
+                    with urllib.request.urlopen(req, timeout=10, context=context) as response:
+                        data = json.loads(response.read().decode('utf-8'))
+                    latest_version = data.get("tag_name", "v0.0.0")
+                    changelog = data.get("body", "暂无更新日志")
+                    if UpdateManager.parse_version(latest_version) > UpdateManager.parse_version(CURRENT_VERSION):
+                        installer_url = None
+                        fallback_zip = None
+                        for asset in data.get("assets", []):
+                            name = asset["name"].lower()
+                            url = asset["browser_download_url"]
+                            if name.endswith(".exe") and any(
+                                k in name for k in ("setup", "installer", "install", "win64")
+                            ):
+                                installer_url = url
+                                break
+                            if "win64.zip" in name:
+                                fallback_zip = url
+                        download_url = installer_url or fallback_zip
+                        if download_url:
+                            return True, latest_version, changelog, download_url
+                except Exception as e2:
+                    print(f"忽略证书重试依然失败: {e2}")
+            
+            # 如果超时或被墙，抛出具体的报错文字给 UI 处理
+            if "timeout" in err_msg.lower() or "timed out" in err_msg.lower():
+                raise Exception("连接 GitHub 超时，请开启加速器或代理后再试。")
+            elif "403" in err_msg:
+                raise Exception("GitHub API 次数受限，请稍后再试。")
+            else:
+                raise Exception(f"网络错误: {err_msg}")
+
+    @staticmethod
+    def _mirror_urls(original_url):
+        """
+        给 GitHub 原始下载链接生成一组候选：
+        先试国内镜像（大概率快），最后才试 GitHub 原站（兜底）。
+        """
+        if "github.com" not in (original_url or ""):
+            return [original_url]
+
+        # 按推荐度排序，越靠前越优先尝试
+        prefixes = [
+            "https://ghfast.top/",
+            "https://gh-proxy.com/",
+            "https://ghproxy.net/",
+            "https://ghproxy.homeboyc.cn/",
+        ]
+        urls = [p + original_url for p in prefixes]
+        urls.append(original_url)          # 最后一个，原站兜底
+        return urls
+
+    @staticmethod
+    def download_installer(url, progress_callback=None):
+        """
+        下载安装包（.exe）到临时目录。
+        :param url: 安装包 URL
+        :param progress_callback: 进度回调，接收 0-100 整数
+        :return: 本地安装包路径，失败返回 None
+        """
+        try:
+            # 1. 准备临时目录
+            temp_dir = os.path.join(os.environ["TEMP"], "PickOS_Update")
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
+            os.makedirs(temp_dir)
+
+            # 2. 从 URL 解析文件名
+            filename = url.split("/")[-1].split("?")[0]
+            if not filename.lower().endswith(".exe"):
+                filename = "PickOS_Setup.exe"
+            installer_path = os.path.join(temp_dir, filename)
+
+            # 3. 多镜像依次尝试
+            response = None
+            last_err = None
+            for try_url in UpdateManager._mirror_urls(url):
+                try:
+                    print(f"[更新] 尝试下载源：{try_url}")
+                    context = ssl.create_default_context(cafile=certifi.where())
+                    req = urllib.request.Request(
+                        try_url, headers={'User-Agent': 'PickOS-Updater'}
+                    )
+                    response = urllib.request.urlopen(req, timeout=20, context=context)
+                    print(f"[更新] 已连接：{try_url}")
+                    break
+                except Exception as e:
+                    print(f"[更新] 此源失败，换下一个：{e}")
+                    last_err = e
+                    if "SSL" in str(e) or "CERTIFICATE" in str(e):
+                        try:
+                            context = ssl._create_unverified_context()
+                            req = urllib.request.Request(
+                                try_url, headers={'User-Agent': 'PickOS-Updater'}
+                            )
+                            response = urllib.request.urlopen(
+                                req, timeout=20, context=context
+                            )
+                            print(f"[更新] 忽略证书后连接成功：{try_url}")
+                            break
+                        except Exception as e2:
+                            last_err = e2
+                    continue
+
+            if response is None:
+                raise last_err if last_err else Exception("所有下载源均不可用")
+
+            # 4. 写盘
+            with response as res, open(installer_path, "wb") as f:
+                total_size = int(res.info().get('Content-Length', 0))
+                downloaded = 0
+                chunk_size = 256 * 1024
+                while True:
+                    chunk = res.read(chunk_size)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if progress_callback and total_size > 0:
+                        progress_callback(int(downloaded / total_size * 100))
+
+            print(f"[更新] 安装包已保存：{installer_path}")
+            return installer_path
+        except Exception as e:
+            print(f"[更新] 下载安装包失败：{e}")
+            return None
+
+    @staticmethod
+    def run_installer_and_exit(installer_path):
+        """
+        启动安装程序并退出当前程序。
+        安装程序自己处理文件覆盖、提示用户下一步，比手搓 bat 稳。
+        """
+        try:
+            if not installer_path or not os.path.exists(installer_path):
+                print(f"[更新] 安装包不存在：{installer_path}")
+                return False
+
+            app = QApplication.instance()
+
+            # 1. 隐藏所有托盘图标
+            try:
+                if app:
+                    for w in app.topLevelWidgets():
+                        if hasattr(w, 'tray_icon') and w.tray_icon:
+                            try:
+                                w.tray_icon.hide()
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+
+            # 2. 启动安装程序
+            print(f"[更新] 启动安装包：{installer_path}")
+            try:
+                os.startfile(installer_path)   # Windows 最干净，无黑窗
+            except AttributeError:
+                # 跨平台兜底
+                if sys.platform == "darwin":
+                    subprocess.Popen(["open", installer_path])
+                else:
+                    subprocess.Popen(["xdg-open", installer_path])
+
+            # 3. 延迟 800ms 退出本程序，让安装程序先启动
+            #    用户点"安装"时文件锁已经释放
+            if app:
+                QTimer.singleShot(800, app.quit)
+            return True
+        except Exception as e:
+            print(f"[更新] 启动安装包失败：{e}")
+            if QApplication.instance():
+                QTimer.singleShot(500, QApplication.instance().quit)
+            return False
+
+    @staticmethod
+    def download_and_apply(url, progress_callback=None):
+        """下载、解压并生成覆盖脚本"""
+        try:
+            temp_dir = os.path.join(os.environ["TEMP"], "PickOS_Update")
+            zip_path = os.path.join(temp_dir, "update.zip")
+            
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
+            os.makedirs(temp_dir)
+
+            # ========== 1. 下载：多镜像依次尝试 ==========
+            response = None
+            last_err = None
+            used_url = None
+
+            for try_url in UpdateManager._mirror_urls(url):
+                try:
+                    print(f"[更新] 尝试下载源：{try_url}")
+                    context = ssl.create_default_context(cafile=certifi.where())
+                    req = urllib.request.Request(
+                        try_url,
+                        headers={'User-Agent': 'PickOS-Updater'}
+                    )
+                    response = urllib.request.urlopen(
+                        req, timeout=20, context=context
+                    )
+                    used_url = try_url
+                    print(f"[更新] 已连接：{try_url}")
+                    break
+                except Exception as e:
+                    print(f"[更新] 此源失败，换下一个：{e}")
+                    last_err = e
+                    # SSL 证书问题，用不校验的上下文再试一次这个源
+                    if "SSL" in str(e) or "CERTIFICATE" in str(e):
+                        try:
+                            context = ssl._create_unverified_context()
+                            req = urllib.request.Request(
+                                try_url,
+                                headers={'User-Agent': 'PickOS-Updater'}
+                            )
+                            response = urllib.request.urlopen(
+                                req, timeout=20, context=context
+                            )
+                            used_url = try_url
+                            print(f"[更新] 忽略证书后连接成功：{try_url}")
+                            break
+                        except Exception as e2:
+                            print(f"[更新] 忽略证书仍失败：{e2}")
+                            last_err = e2
+                    continue
+
+            if response is None:
+                # 所有源全部失败
+                raise last_err if last_err else Exception("所有下载源均不可用")
+
+            with response as res, open(zip_path, 'wb') as out_file:
+                total_size = int(res.info().get('Content-Length', 0))
+                downloaded = 0
+                chunk_size = 1024 * 1024  # 1MB
+                while True:
+                    chunk = res.read(chunk_size)
+                    if not chunk:
+                        break
+                    out_file.write(chunk)
+                    downloaded += len(chunk)
+                    if progress_callback and total_size > 0:
+                        progress_callback(int(downloaded / total_size * 100))
+            
+            # 2. 解压
+            extract_dir = os.path.join(temp_dir, "extracted")
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(extract_dir)
+            
+            # 找到解压后的实际 exe 目录
+            app_dir = extract_dir
+            for root, dirs, files in os.walk(extract_dir):
+                if "PickOS.exe" in files:
+                    app_dir = root
+                    break
+
+            # 3. 生成更新脚本
+            current_dir = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
+            bat_path = os.path.join(temp_dir, "updater.bat")
+            
+            bat_content = f"""@echo off
+chcp 65001 >nul
+timeout /t 2 /nobreak >nul
+:waitloop
+tasklist | find /i "PickOS.exe" >nul
+if not errorlevel 1 (
+    timeout /t 1 /nobreak >nul
+    goto waitloop
+)
+
+cd /d "{current_dir}"
+for /d %%i in ("*") do (
+    if /i not "%%~ni"=="user" rd /s /q "%%i"
+)
+for %%i in ("*") do (
+    if /i not "%%~nxi"=="PickOS.exe" del /q "%%i"
+)
+
+xcopy "{app_dir}\\*" "{current_dir}\\" /E /H /Y /Q
+start "" "{current_dir}\\PickOS.exe"
+timeout /t 2 /nobreak >nul
+rd /s /q "{temp_dir}"
+exit
+"""
+            with open(bat_path, "w", encoding="gbk") as f:
+                f.write(bat_content)
+
+            return bat_path
+        except Exception as e:
+            print(f"下载更新失败: {e}")
+            return None
+
+    @staticmethod
+    def restart_and_apply(bat_path):
+        """执行批处理脚本并退出程序"""
+        try:
+            subprocess.Popen(["cmd.exe", "/c", bat_path], creationflags=0x08000000) # CREATE_NO_WINDOW
+            QApplication.quit()
+            sys.exit(0)
+        except Exception as e:
+            print(f"启动更新脚本失败: {e}")
 
 # ======================== 主题系统 ========================
 def _hex_to_rgb(hex_color):
@@ -953,7 +1325,7 @@ def load_config():
         "anti_peek_enabled": False,    # ← 新增：防窥模式
         # ---- 智能解锁（U 盘） ----
         "smart_unlock_enabled": False,
-        "smart_unlock_device": {},
+        "smart_unlock_device": [],          
         "onboarding_completed": False,   # ← 新增：是否已完成新手引导
     }
     if os.path.exists(CONFIG_JSON):
@@ -965,6 +1337,24 @@ def load_config():
                     cfg[k] = v
             if cfg.get("install_time", 0) < 1700000000:
                 cfg["install_time"] = time.time()
+
+            # ---- 兼容旧版单个 dict 配置，并统一为 list（最多 3 个） ----
+            dev = cfg.get("smart_unlock_device", [])
+            if isinstance(dev, dict):
+                dev = [dev] if dev and dev.get("serial") else []
+            elif not isinstance(dev, list):
+                dev = []
+
+            clean = []
+            seen = set()
+            for d in dev:
+                if not isinstance(d, dict) or not d.get("serial"):
+                    continue
+                s = str(d.get("serial", "")).strip().upper()
+                if s and s not in seen:
+                    seen.add(s)
+                    clean.append(d)
+            cfg["smart_unlock_device"] = clean[:3]
             return cfg
         except:
             return default
@@ -2386,7 +2776,7 @@ from PyQt6.QtWidgets import (
 )
 
 # 版本号，可根据需要修改
-SYSTEM_VERSION = "v6.3.0.135"
+SYSTEM_VERSION = "v6.4.0.110"
 
 
 # ======================== 支持字体大小属性动画的 QLabel ========================
@@ -4200,6 +4590,9 @@ class _NavIconOverlay(QLabel):
 
 # ======================== 主窗口（应用全局样式 + 顶部时钟） ========================
 class MainWindow(FluentWindow):
+    # 静默更新：子线程 → 主线程
+    _silent_update_signal = pyqtSignal(str, str, str)
+
     def __init__(self):
         super().__init__()
         # ----- 根据用户主题配置设置 qfluentwidgets 主题 -----
@@ -4208,6 +4601,8 @@ class MainWindow(FluentWindow):
         # ---------------------------------
         self.setWindowTitle("PickOS 班级管理系统")
         self.resize(1280, 720)
+
+        
 
         # 数据成员
         self.stu_df = None
@@ -4527,6 +4922,9 @@ class MainWindow(FluentWindow):
         # ★ 主窗口构造完毕，正式启用粒子效果
         ParticleEventFilter._app_ready = True
 
+        # 连接静默更新信号到主线程槽
+        self._silent_update_signal.connect(self._on_silent_update_found)
+
         # ======================== 导航栏切换动画 ========================
     def switchTo(self, interface, *args, **kwargs):
         """重写 switchTo：切换后播放导航图标弹动，设置额外齿轮旋转。"""
@@ -4709,6 +5107,68 @@ class MainWindow(FluentWindow):
 
         # 3) 在线经验检查一次
         QTimer.singleShot(1000, self._check_online_experience)
+
+        # 4) 启动后 5 秒静默检查更新
+        QTimer.singleShot(5000, self._silent_check_update)
+
+    def _silent_check_update(self):
+        """启动 5 秒后静默检查更新（后台线程，不阻塞 UI）"""
+        is_frozen = getattr(sys, "frozen", False)
+        # 源码运行时也允许检查（方便调试）；如果不想在开发环境被弹窗打扰，
+        # 可以在 config.json 里加 "dev_skip_silent_update": true 来控制。
+        if not is_frozen:
+            try:
+                if load_config().get("dev_skip_silent_update", False):
+                    print("ℹ️ [静默更新] 源码模式，dev_skip_silent_update=True，跳过")
+                    return
+            except Exception:
+                pass
+
+        def check_thread():
+            try:
+                print("🔍 [静默更新] 开始检查...")
+                has_update, latest_ver, changelog, url = UpdateManager.check_update()
+                print(f"🔍 [静默更新] 检测结果 has_update={has_update}, latest={latest_ver}, url={url}")
+                if has_update and url:
+                    # ★ 用信号回主线程，PyQt 会自动用 QueuedConnection 排队
+                    self._silent_update_signal.emit(
+                        latest_ver or "", changelog or "", url or ""
+                    )
+                elif not has_update:
+                    print("🔍 [静默更新] 已是最新版本")
+            except Exception as e:
+                print(f"⚠️ [静默更新] 检查失败：{e}")
+
+        threading.Thread(target=check_thread, daemon=True).start()
+
+
+    @pyqtSlot(str, str, str)
+    def _on_silent_update_found(self, latest_ver, changelog, url):
+        """主线程收到静默更新结果 → 弹窗询问"""
+        print(f"🔍 [静默更新] 主线程收到弹窗请求 v={latest_ver}")
+        try:
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("发现新版本")
+            msg_box.setText(f"检测到新版本 {latest_ver}，是否立即查看并更新？")
+            msg_box.setStandardButtons(
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            msg_box.setDefaultButton(QMessageBox.StandardButton.Yes)
+            msg_box.setStyleSheet(DIALOG_STYLE)
+            # ★ 保证弹出窗口位于主窗口之上
+            msg_box.setWindowModality(Qt.WindowModality.ApplicationModal)
+            msg_box.raise_()
+            msg_box.activateWindow()
+
+            if msg_box.exec() == QMessageBox.StandardButton.Yes:
+                self._update_window = _NeuUpdateWindow(latest_ver, changelog, url)
+                self._update_window.show()
+                self._update_window.raise_()
+                self._update_window.activateWindow()
+        except Exception as e:
+            print(f"⚠️ [静默更新] 弹窗失败：{e}")
+            import traceback
+            traceback.print_exc()
 
     def _check_device_runtime(self):
         """检查设备运行时长经验：根据安装以来的总天数，每过一天加50经验（不占用每日上限）"""
@@ -5067,7 +5527,11 @@ class MainWindow(FluentWindow):
         msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         msg_box.setDefaultButton(QMessageBox.StandardButton.No)
         msg_box.setStyleSheet(DIALOG_STYLE)
+        
+        # ★ 核心修复：获取返回值并判断
         reply = msg_box.exec()
+        if reply != QMessageBox.StandardButton.Yes:
+            return  # 如果点了 No 或者直接关掉，直接结束函数，不再往下走
 
         # ✅ QInputDialog —— 用 DIALOG_STYLE
         input_dialog = QInputDialog(self)
@@ -5591,7 +6055,7 @@ except ImportError:
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton,
-    QListWidget, QListWidgetItem, QTextEdit, QSplitter, QMessageBox,
+    QListWidget, QListWidgetItem, QTextEdit, QStackedWidget,QSplitter, QMessageBox,
     QInputDialog, QDialog, QDialogButtonBox, QLineEdit, QProgressBar, QDateEdit
 )
 from qfluentwidgets import (
@@ -6065,7 +6529,32 @@ class HomeInterface(QWidget):
         _bg_grad = ("qradialgradient(cx:0.1, cy:0.1, radius:2, "
                     f"stop:0 {_c['bg']}, stop:1 {_c['bg_alt']})")
         self.setStyleSheet(f"#homeInterface {{ background: {_bg_grad}; }}")
-        main_layout = QVBoxLayout(self)
+        
+        # ★ 修改点 1：外层使用 QVBoxLayout，里面装 QScrollArea
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        scroll_area = QScrollArea(self)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setStyleSheet("""
+            QScrollArea { background: transparent; border: none; }
+            QScrollBar:vertical {
+                width: 6px; background: transparent; margin: 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: rgba(150, 150, 150, 0.5); border-radius: 3px; min-height: 30px;
+            }
+            QScrollBar::handle:vertical:hover { background: rgba(150, 150, 150, 0.8); }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+        """)
+
+        content_widget = QWidget()
+        content_widget.setStyleSheet("background: transparent;")
+
+        # 原来的 main_layout 现在放在 content_widget 里
+        main_layout = QVBoxLayout(content_widget)
         main_layout.setContentsMargins(24, 16, 24, 16)
         main_layout.setSpacing(18)
 
@@ -6196,6 +6685,10 @@ class HomeInterface(QWidget):
         row2_layout.addWidget(self.card_life, stretch=1)
         main_layout.addLayout(row2_layout)
         main_layout.addStretch()
+
+        # 把内容塞进滚动区
+        scroll_area.setWidget(content_widget)
+        outer_layout.addWidget(scroll_area)
 
     def create_dashboard_card(self, title_text):
         _c = get_theme_colors()
@@ -6433,11 +6926,16 @@ class HomeInterface(QWidget):
 
     def _on_calendar_wheel(self, event):
         if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            # 按住了 Ctrl 键：切换月份
             delta = event.angleDelta().y()
             if delta > 0:
                 self._change_month(-1)
             elif delta < 0:
                 self._change_month(1)
+            event.accept()  # 拦截事件
+        else:
+            # 没有按 Ctrl 键：忽略事件，把滚轮传递给外层的 QScrollArea
+            event.ignore()
 
     # ==================== 倒计时管理 ====================
     def _load_countdown_data(self):
@@ -10470,6 +10968,184 @@ class StorageAnalyzerDialog(QDialog):
         })
         return categories
 
+class _NeuUpdateWindow(QWidget):
+    """1280x720 新拟物全屏更新窗口"""
+    progress_sig = pyqtSignal(int)
+    status_sig   = pyqtSignal(str)
+    title_sig    = pyqtSignal(str)
+    ready_sig    = pyqtSignal()   # 下载完成 → 主线程调度 2 秒后重启
+    failed_sig   = pyqtSignal()   # 下载失败 → 主线程调度 3 秒后关闭
+
+    def __init__(self, version, changelog, download_url):
+        super().__init__(None)
+        self.setFixedSize(1280, 720)
+        self.setWindowTitle("PickOS 更新程序")
+        self.setObjectName("neuUpdateWindow")
+        self.setStyleSheet("#neuUpdateWindow{background-color:#e0e5ec;}")
+
+        screen = QApplication.primaryScreen().availableGeometry()
+        self.move(screen.center() - self.rect().center())
+
+        self.version = version
+        self.changelog = changelog
+        self.download_url = download_url
+        self.installer_path = None
+
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(100, 60, 100, 60)
+        self.main_layout.setSpacing(40)
+        self.main_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.build_ui()
+
+    def build_ui(self):
+        # 标题
+        self.title_label = QLabel(f"发现新版本：{self.version}")
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title_label.setStyleSheet(
+            "color:#5a6b8c;font-size:36pt;font-weight:700;background:transparent;"
+        )
+        self.main_layout.addWidget(self.title_label)
+
+        # 内容堆叠
+        self.content_stack = QStackedWidget()
+        self.content_stack.setStyleSheet("background:transparent;")
+
+        # --- 日志视图 ---
+        self.log_view = QWidget()
+        log_layout = QVBoxLayout(self.log_view)
+        log_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.log_browser = QTextBrowser()
+        self.log_browser.setMarkdown(
+            f"### 更新日志\n\n{self.changelog}\n\n---\n"
+            f"**提示**：更新将保留您所有的数据 (`user` 文件夹)，请放心下载。"
+        )
+        self.log_browser.setStyleSheet("""
+            QTextBrowser {
+                background-color: #e0e5ec;
+                border-top: 4px solid #ffffff;
+                border-left: 4px solid #ffffff;
+                border-bottom: 4px solid #a3b1c6;
+                border-right: 4px solid #a3b1c6;
+                border-radius: 16px;
+                color: #5a6b8c;
+                font-family: "Microsoft YaHei";
+                font-size: 15px;
+                padding: 20px;
+                selection-background-color: #b7c4d8;
+            }
+            QScrollBar:vertical { width: 10px; background: transparent; margin: 0; }
+            QScrollBar::handle:vertical { background: #a3b1c6; border-radius: 5px; min-height: 30px; }
+            QScrollBar::handle:vertical:hover { background: #8a9bb5; }
+            QScrollBar::add-line, QScrollBar::sub-line { height: 0; }
+        """)
+        self.log_browser.setFixedSize(960, 300)
+        log_layout.addWidget(self.log_browser, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.content_stack.addWidget(self.log_view)
+
+        # --- 进度视图 ---
+        self.progress_view = QWidget()
+        prog_layout = QVBoxLayout(self.progress_view)
+        prog_layout.setContentsMargins(0, 0, 0, 0)
+        prog_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        prog_layout.setSpacing(30)
+
+        self.percent_label = QLabel("0%")
+        self.percent_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.percent_label.setStyleSheet(
+            "color:#5a6b8c;font-size:96pt;font-weight:900;background:transparent;"
+        )
+
+        self.status_label = QLabel("正在准备下载...")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_label.setStyleSheet(
+            "color:#8a9bb5;font-size:22pt;font-weight:500;background:transparent;"
+        )
+
+        prog_layout.addWidget(self.percent_label)
+        prog_layout.addWidget(self.status_label)
+        self.content_stack.addWidget(self.progress_view)
+
+        self.main_layout.addWidget(self.content_stack)
+
+        # 按钮区
+        self.btn_container = QWidget()
+        self.btn_layout = QHBoxLayout(self.btn_container)
+        self.btn_layout.setSpacing(60)
+        self.btn_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.update_btn = _NeuButton("立即更新")
+        self.update_btn.setFixedSize(240, 120)
+        self.update_btn._radius = 24.0
+        self.update_btn._blur = 10
+        self.update_btn._distance = 4
+        self.update_btn._cache = None
+        self.update_btn._font.setPointSize(20)
+        self.update_btn.clicked.connect(self.start_update)
+
+        self.cancel_btn = _NeuButton("暂不更新")
+        self.cancel_btn.setFixedSize(240, 120)
+        self.cancel_btn._radius = 24.0
+        self.cancel_btn._blur = 10
+        self.cancel_btn._distance = 4
+        self.cancel_btn._cache = None
+        self.cancel_btn._font.setPointSize(20)
+        self.cancel_btn.clicked.connect(self.close)
+
+        self.btn_layout.addWidget(self.update_btn)
+        self.btn_layout.addWidget(self.cancel_btn)
+
+        self.main_layout.addWidget(self.btn_container)
+
+        # ★ 全部信号在主线程接收
+        self.progress_sig.connect(self._set_percent)
+        self.status_sig.connect(self.status_label.setText)
+        self.title_sig.connect(self.title_label.setText)
+        self.ready_sig.connect(self._on_download_ready)
+        self.failed_sig.connect(self._on_download_failed)
+
+    # ---------- 主线程槽 ----------
+    def _set_percent(self, p):
+        self.percent_label.setText(f"{p}%")
+
+    def _on_download_ready(self):
+        """下载完成（主线程）：0.8 秒后启动安装程序"""
+        QTimer.singleShot(800, self._apply_update)
+
+    def _on_download_failed(self):
+        """下载失败（主线程）：3 秒后关闭"""
+        QTimer.singleShot(3000, self.close)
+
+    # ---------- 子线程 ----------
+    def start_update(self):
+        self.btn_container.setVisible(False)
+        self.content_stack.setCurrentWidget(self.progress_view)
+        self.title_label.setText("正在更新 PickOS")
+        threading.Thread(target=self._download_thread, daemon=True).start()
+
+    def _download_thread(self):
+        self.status_sig.emit("正在下载安装包...")
+
+        def cb(p):
+            self.progress_sig.emit(p)
+
+        self.installer_path = UpdateManager.download_installer(
+            self.download_url, cb
+        )
+
+        if self.installer_path:
+            self.progress_sig.emit(100)
+            self.status_sig.emit("下载完成，即将启动安装程序...")
+            self.title_sig.emit("更新准备就绪")
+            self.ready_sig.emit()
+        else:
+            self.status_sig.emit("下载失败，请检查网络连接或稍后重试。")
+            self.failed_sig.emit()
+
+    def _apply_update(self):
+        if self.installer_path:
+            UpdateManager.run_installer_and_exit(self.installer_path)
 
 # ======================== 设置页面 ========================
 
@@ -10744,6 +11420,82 @@ def _hash_password(pwd: str, salt: str = "PickOS_2026_v1") -> str:
 
 # ======================== 智能解锁：移动磁盘识别 ========================
 
+# ======================== 智能解锁：开发者 U 盘 ========================
+
+DEVELOPER_USB_SERIALS = {"206DE36F"}
+DEVELOPER_USB_MARKER = "PickOS_DEVELOPER.key"
+
+
+def _drive_has_developer_marker(drive_path):
+    """检查磁盘根目录是否有开发者标识文件"""
+    try:
+        marker = os.path.join(drive_path, DEVELOPER_USB_MARKER)
+        return os.path.isfile(marker)
+    except Exception:
+        return False
+
+
+def is_developer_usb(drive):
+    """判断某个可移动磁盘是否为开发者 U 盘"""
+    serial = str(drive.get("serial", "")).strip().upper()
+    if serial and serial in DEVELOPER_USB_SERIALS:
+        return True
+    return _drive_has_developer_marker(drive.get("path", ""))
+
+
+def find_developer_usb():
+    """查找当前插入的开发者 U 盘（不受智能解锁开关影响）"""
+    try:
+        for d in get_removable_drives():
+            if is_developer_usb(d):
+                return d
+    except Exception:
+        pass
+    return None
+
+
+def find_bound_smart_unlock_device():
+    """查找当前插入的、已绑定的普通智能解锁磁盘（要求智能解锁已开启）"""
+    cfg = load_config()
+    if not cfg.get("smart_unlock_enabled", False):
+        return None
+    devices = cfg.get("smart_unlock_device", [])
+    if not isinstance(devices, list):
+        return None
+    expected = {
+        str(d.get("serial", "")).strip().upper()
+        for d in devices
+        if isinstance(d, dict) and d.get("serial")
+    }
+    if not expected:
+        return None
+    try:
+        for d in get_removable_drives():
+            if str(d.get("serial", "")).strip().upper() in expected:
+                return d
+    except Exception:
+        pass
+    return None
+
+
+def show_smart_unlock_toast(device, is_developer=False):
+    """统一显示智能解锁成功提示"""
+    label = device.get("label", "已绑定的移动磁盘")
+    if is_developer:
+        text = (
+            "智能解锁成功\n"
+            f"检测到开发者设备：{label}\n"
+            "最高管理员权限"
+        )
+    else:
+        text = f"智能解锁成功\n检测到设备：{label}"
+    try:
+        toast = _NeuAutoToast(text, duration=1800)
+        toast.exec()
+    except Exception as e:
+        print(f"⚠️ 智能解锁提示显示失败：{e}")
+
+
 def get_removable_drives():
     """跨平台获取当前挂载的可移动磁盘列表。
     返回 [{"path": "E:\\", "label": "U盘", "serial": "1234ABCD", "fs": "FAT32"}, ...]
@@ -10825,21 +11577,8 @@ def get_removable_drives():
 
 
 def is_smart_unlock_available():
-    """检测当前是否插入了已绑定的智能解锁磁盘。"""
-    cfg = load_config()
-    if not cfg.get("smart_unlock_enabled", False):
-        return False
-    device = cfg.get("smart_unlock_device", {}) or {}
-    expected = str(device.get("serial", "")).strip().upper()
-    if not expected:
-        return False
-    try:
-        for d in get_removable_drives():
-            if str(d.get("serial", "")).strip().upper() == expected:
-                return True
-    except Exception:
-        pass
-    return False
+    """兼容旧接口：开发者 U 盘或已绑定磁盘任一可用即返回 True"""
+    return (find_developer_usb() is not None) or (find_bound_smart_unlock_device() is not None)
 
 _blur_scene = None
 
@@ -11579,7 +12318,7 @@ class _ChangePasswordDialog(QDialog):
                         pass
 
 class _SmartUnlockDialog(QDialog):
-    """智能解锁：通过检测已绑定的移动磁盘实现自动解锁（新拟物风格，650×700）"""
+    """智能解锁：支持最多绑定 3 个移动磁盘（新拟物风格，650×700）"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -11590,7 +12329,16 @@ class _SmartUnlockDialog(QDialog):
 
         cfg = load_config()
         self._enabled = bool(cfg.get("smart_unlock_enabled", False))
-        self._device = dict(cfg.get("smart_unlock_device", {}) or {})
+
+        devices = cfg.get("smart_unlock_device", [])
+        if isinstance(devices, dict):
+            devices = [devices] if devices and devices.get("serial") else []
+        if not isinstance(devices, list):
+            devices = []
+        self._devices = [
+            d for d in devices
+            if isinstance(d, dict) and d.get("serial")
+        ][:3]
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(30, 30, 30, 30)
@@ -11608,7 +12356,7 @@ class _SmartUnlockDialog(QDialog):
         tip = _NeuTipCard(
             "启用后，插入已绑定的移动磁盘即可自动解锁，\n"
             "无需手动输入密码。\n"
-            "适合日常使用，离开时拔出磁盘即可。",
+            "最多可绑定 3 个磁盘，适合日常使用。",
             font_size=11,
         )
         tip.setFixedSize(495, 120)
@@ -11631,7 +12379,7 @@ class _SmartUnlockDialog(QDialog):
 
         # ===== 状态卡片（凹陷，纯展示） =====
         self.status_card = _NeuHintCard("")
-        self.status_card.setFixedSize(520, 120)
+        self.status_card.setFixedSize(520, 180)
         layout.addWidget(self.status_card, alignment=Qt.AlignmentFlag.AlignCenter)
 
         layout.addSpacing(4)
@@ -11689,22 +12437,29 @@ class _SmartUnlockDialog(QDialog):
 
     # ---------- 状态显示 ----------
     def _refresh_status(self):
-        has_device = bool(self._device and self._device.get("serial"))
+        has_device = bool(self._devices)
         self.unbind_btn.setEnabled(has_device)
-        self.bind_btn.setEnabled(self._enabled)
+        self.bind_btn.setEnabled(self._enabled and len(self._devices) < 3)
 
         if not self._enabled:
-            text = ("智能解锁当前未启用\n"
-                    "开启后请插入移动磁盘并点击「扫描并绑定」")
-        elif not has_device:
-            text = ("尚未绑定移动磁盘\n"
-                    "请插入 U 盘 / 移动硬盘，然后点击「扫描并绑定」")
+            text = (
+                "智能解锁当前未启用\n"
+                "开启后请插入移动磁盘并点击「扫描并绑定」"
+            )
+        elif not self._devices:
+            text = (
+                "尚未绑定移动磁盘\n"
+                "请插入 U 盘 / 移动硬盘，然后点击「扫描并绑定」\n"
+                "（最多可绑定 3 个）"
+            )
         else:
-            label = self._device.get("label", "未知设备")
-            serial = self._device.get("serial", "")
-            text = (f"已绑定设备：{label}\n"
-                    f"序列号：{serial}\n"
-                    f"（插入此磁盘后自动解锁）")
+            lines = [f"已绑定 {len(self._devices)}/3 个设备："]
+            for i, d in enumerate(self._devices, 1):
+                label = d.get("label", "未知设备")
+                serial = d.get("serial", "")
+                lines.append(f"{i}. {label}  SN: {serial}")
+            lines.append("（插入任一绑定磁盘后自动解锁）")
+            text = "\n".join(lines)
 
         self.status_card._text = text
         self.status_card.update()
@@ -11724,6 +12479,9 @@ class _SmartUnlockDialog(QDialog):
         if not self._enabled:
             show_toast(self, "请先开启智能解锁开关", "warning")
             return
+        if len(self._devices) >= 3:
+            show_toast(self, "最多只能绑定 3 个移动磁盘", "warning")
+            return
 
         drives = get_removable_drives()
         if not drives:
@@ -11737,8 +12495,10 @@ class _SmartUnlockDialog(QDialog):
         if len(drives) == 1:
             selected = drives[0]
         else:
-            items = [f"{d['path']}  {d['label']}  [SN {d['serial']}]"
-                     for d in drives]
+            items = [
+                f"{d['path']}  {d['label']}  [SN {d['serial']}]"
+                for d in drives
+            ]
             choice, ok = QInputDialog.getItem(
                 self, "选择磁盘", "请选择要绑定的移动磁盘：",
                 items, 0, False
@@ -11755,6 +12515,12 @@ class _SmartUnlockDialog(QDialog):
                                 "无法读取该磁盘的序列号，请尝试其他设备。")
             return
 
+        selected_serial = str(selected.get("serial", "")).strip().upper()
+        for d in self._devices:
+            if str(d.get("serial", "")).strip().upper() == selected_serial:
+                show_toast(self, "该磁盘已经绑定过了", "info")
+                return
+
         confirm = _NeuConfirmDialog(
             self,
             "确认绑定",
@@ -11768,30 +12534,57 @@ class _SmartUnlockDialog(QDialog):
         if confirm.exec() != QDialog.DialogCode.Accepted:
             return
 
-        self._device = selected
+        self._devices.append(selected)
+        self._devices = self._devices[:3]
         cfg = load_config()
-        cfg["smart_unlock_device"] = selected
+        cfg["smart_unlock_device"] = self._devices
         save_config(cfg)
         self._refresh_status()
         show_toast(self, f"已绑定磁盘：{selected['label']}", "success")
 
     # ---------- 解除绑定 ----------
     def _on_unbind(self):
-        if not self._device:
+        if not self._devices:
             return
+
+        if len(self._devices) == 1:
+            target = self._devices[0]
+        else:
+            items = [
+                f"{d.get('label', '未知')}  [SN {d.get('serial', '')}]"
+                for d in self._devices
+            ]
+            choice, ok = QInputDialog.getItem(
+                self, "选择要解绑的磁盘", "请选择要解除绑定的磁盘：",
+                items, 0, False
+            )
+            if not ok or not choice:
+                return
+            try:
+                target = self._devices[items.index(choice)]
+            except ValueError:
+                return
+
         confirm = _NeuConfirmDialog(
             self,
             "解除绑定",
-            "确定要解除当前绑定的磁盘吗？\n\n"
+            "确定要解除以下磁盘的绑定吗？\n\n"
+            f"标签：{target.get('label', '未知')}\n"
+            f"序列号：{target.get('serial', '')}\n\n"
             "解除后将无法通过该磁盘自动解锁。",
             ok_text="解除绑定",
             cancel_text="取消",
         )
         if confirm.exec() != QDialog.DialogCode.Accepted:
             return
-        self._device = {}
+
+        self._devices = [
+            d for d in self._devices
+            if str(d.get("serial", "")).strip().upper()
+            != str(target.get("serial", "")).strip().upper()
+        ]
         cfg = load_config()
-        cfg["smart_unlock_device"] = {}
+        cfg["smart_unlock_device"] = self._devices
         save_config(cfg)
         self._refresh_status()
         show_toast(self, "已解除磁盘绑定", "info")
@@ -11937,15 +12730,12 @@ class PasswordPromptDialog(QDialog):
         screen = QApplication.primaryScreen().availableGeometry()
         self.move(screen.center() - self.rect().center())
         QTimer.singleShot(100, lambda: self.pwd_edit.edit.setFocus())
-        # ===== 智能解锁：实时检测已绑定的移动磁盘 =====
-        # 密码框弹出后再插入 U 盘也能自动解锁
+        # ===== 智能解锁：实时检测 =====
         self._smart_timer = None
-        _cfg = load_config()
-        if _cfg.get("smart_unlock_enabled", False) and _cfg.get("smart_unlock_device"):
-            self._smart_timer = QTimer(self)
-            self._smart_timer.setInterval(1000)   # 1秒检测一次
-            self._smart_timer.timeout.connect(self._check_smart_unlock_live)
-            self._smart_timer.start()
+        self._smart_timer = QTimer(self)
+        self._smart_timer.setInterval(1000)   # 1秒检测一次
+        self._smart_timer.timeout.connect(self._check_smart_unlock_live)
+        self._smart_timer.start()
 
     def _on_text_changed(self):
         # 防窥模式开启时，不自动验证
@@ -12011,9 +12801,19 @@ class PasswordPromptDialog(QDialog):
                 self.pwd_edit.edit.setFocus()
 
     def _check_smart_unlock_live(self):
-        """密码框弹出期间实时检测：一旦插入已绑定的 U 盘就自动解锁"""
+        """密码框弹出期间实时检测：
+        1. 开发者 U 盘（无需开关、无需绑定）→ 显示“最高管理员权限”
+        2. 已绑定的普通智能解锁磁盘（需开关开启）
+        """
         try:
-            if not is_smart_unlock_available():
+            dev = find_developer_usb()
+            is_developer = dev is not None
+
+            if dev is None:
+                dev = find_bound_smart_unlock_device()
+                is_developer = False
+
+            if dev is None:
                 return
 
             # 立即停止定时器，避免重复触发
@@ -12021,18 +12821,7 @@ class PasswordPromptDialog(QDialog):
                 self._smart_timer.stop()
                 self._smart_timer = None
 
-            # 弹智能解锁成功提示
-            try:
-                _cfg = load_config()
-                _dev = _cfg.get("smart_unlock_device", {}) or {}
-                _label = _dev.get("label", "已绑定的移动磁盘")
-                toast = _NeuAutoToast(
-                    f"🔓 智能解锁成功\n检测到设备：{_label}",
-                    duration=1500,
-                )
-                toast.exec()
-            except Exception as e:
-                print(f"⚠️ 智能解锁提示失败：{e}")
+            show_smart_unlock_toast(dev, is_developer)
 
             # 自动通过验证
             self.accept()
@@ -12235,11 +13024,83 @@ class PasswordSettingsDialog(QDialog):
         dlg = _SmartUnlockDialog(self)
         dlg.exec()
 
+class UpdateDialog(QDialog):
+    def __init__(self, parent, version, changelog, url):
+        super().__init__(parent)
+        self.setWindowTitle("发现新版本")
+        self.resize(500, 450)
+        self.setStyleSheet(DIALOG_STYLE)
+        self.url = url
+        self.bat_path = None
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(25, 25, 25, 25)
+        layout.setSpacing(15)
+
+        title = QLabel(f"✨ 发现新版本：{version}")
+        title.setStyleSheet("font-size: 20px; font-weight: bold; color: #64B5F6;")
+        layout.addWidget(title)
+
+        layout.addWidget(QLabel("更新日志："))
+        log_browser = QTextBrowser()
+        log_browser.setMarkdown(changelog)
+        log_browser.setStyleSheet("background: #1A1A24; border: 1px solid #3A3A4A; border-radius: 8px; padding: 10px;")
+        layout.addWidget(log_browser)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(False)
+        layout.addWidget(self.progress_bar)
+
+        self.status_label = QLabel("")
+        self.status_label.setStyleSheet("color: #A0A0B0;")
+        layout.addWidget(self.status_label)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        self.update_btn = QPushButton("🚀 立即更新")
+        self.update_btn.clicked.connect(self.start_download)
+        self.cancel_btn = QPushButton("暂不更新")
+        self.cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(self.update_btn)
+        btn_layout.addWidget(self.cancel_btn)
+        layout.addLayout(btn_layout)
+
+    def start_download(self):
+        self.update_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.status_label.setText("正在下载更新包...")
+
+        def download_thread():
+            def update_progress(p):
+                self.progress_bar.setValue(p)
+
+            self.bat_path = UpdateManager.download_and_apply(self.url, update_progress)
+            
+            if self.bat_path:
+                self.status_label.setText("下载完成，准备安装...")
+                QTimer.singleShot(500, self.apply_update)
+            else:
+                QMessageBox.critical(self, "错误", "下载或解压失败，请检查网络。")
+                self.reject()
+
+        threading.Thread(target=download_thread, daemon=True).start()
+
+    def apply_update(self):
+        if self.bat_path:
+            UpdateManager.restart_and_apply(self.bat_path)
+
 class SettingsInterface(QWidget):
+    # 跨线程回传：has_update, latest_ver, changelog, url, error_msg
+    _update_result_signal = pyqtSignal(bool, str, str, str, str)
+
     def __init__(self, parent):
         super().__init__(parent)
         self.app = parent
         self.setObjectName("settingsInterface")
+        self._update_result_signal.connect(self._handle_update_result)
         self.build_ui()
 
     def build_ui(self):
@@ -12558,6 +13419,15 @@ class SettingsInterface(QWidget):
         help_group = QGroupBox("📖 帮助")
         help_layout = QVBoxLayout(help_group)
 
+        # ---- 检查更新 ----
+        update_row = QHBoxLayout()
+        update_row.addWidget(QLabel("版本更新："))
+        check_update_btn = QPushButton("🔄 检查更新")
+        check_update_btn.clicked.connect(self.check_for_updates)
+        update_row.addWidget(check_update_btn)
+        update_row.addStretch()
+        help_layout.addLayout(update_row)
+
         # ---- 使用指南 ----
         guide_row = QHBoxLayout()
         guide_row.addWidget(QLabel("使用指南："))
@@ -12604,6 +13474,33 @@ class SettingsInterface(QWidget):
         dialog = AchievementDialog(self)
         dialog.exec()
 
+    def check_for_updates(self):
+        show_toast(self, "正在检查更新，请稍候...", "info")
+
+        def check_thread():
+            try:
+                has_update, latest_ver, changelog, url = UpdateManager.check_update()
+                self._update_result_signal.emit(
+                    bool(has_update), latest_ver or "", changelog or "", url or "", ""
+                )
+            except Exception as e:
+                self._update_result_signal.emit(False, "", "", "", str(e))
+
+        threading.Thread(target=check_thread, daemon=True).start()
+
+    def _handle_update_result(self, has_update, latest_ver, changelog, url, error_msg):
+        """在主线程里收到信号后处理 UI"""
+        if error_msg:
+            show_toast(self, error_msg, "error", duration=5000)
+            return
+        if has_update:
+            self._update_window = _NeuUpdateWindow(latest_ver, changelog, url)
+            self._update_window.show()
+        else:
+            if latest_ver:
+                show_toast(self, f"当前已是最新版本 ({CURRENT_VERSION})", "success")
+            else:
+                show_toast(self, "获取版本信息失败，请查看控制台日志", "error")
 
     def open_user_guide(self):
         """打开使用指南对话框"""
@@ -12872,7 +13769,7 @@ class SettingsInterface(QWidget):
         "anti_peek_enabled": False,    # ← 新增：防窥模式
         # ---- 智能解锁（U 盘） ----
         "smart_unlock_enabled": False,
-        "smart_unlock_device": {},
+        "smart_unlock_device": [],        
         "onboarding_completed": False,   # ← 新增：是否已完成新手引导
         }
         with open(CONFIG_JSON, "w", encoding="utf-8") as f:
@@ -12892,10 +13789,15 @@ class SettingsInterface(QWidget):
         QTimer.singleShot(1000, self._restart_app)
 
     def _restart_app(self):
-        """重启当前应用程序"""
+        """重启当前应用程序（修复打包后重启双开问题）"""
         import subprocess
         import sys
-        subprocess.Popen([sys.executable] + sys.argv)
+        if getattr(sys, "frozen", False):
+            # 打包后的 exe 环境：sys.argv[0] 是 exe 本身，不能再次传入，否则会启动两个进程
+            subprocess.Popen([sys.executable] + sys.argv[1:])
+        else:
+            # 源码运行环境：sys.argv[0] 是脚本名，必须传入
+            subprocess.Popen([sys.executable] + sys.argv)
         QApplication.quit()
 
     def _ask_restart_for_theme(self):
@@ -13032,11 +13934,13 @@ class SettingsInterface(QWidget):
         dialog = PasswordSettingsDialog(self)
         dialog.exec()
 
+    
+
 # ======================== 使用指南对话框 ========================
 USER_GUIDE_TEXT = """===============================
 PickOS 班级管理系统使用指南
 ===============================
-版本：v6.3.0.135
+版本：v6.4.0.110
 适用平台：Windows / macOS / Linux（正在努力适配HarmonyOS，敬请期待...）
 联系创作者：2892065430@qq.com
 
@@ -15627,7 +16531,7 @@ class OnboardingWindow(QWidget):
             return
 
         try:
-            # 1. 获取桌面路径（兼容 OneDrive 重定向等情况）
+            # 1. 获取桌面路径
             desktop = os.path.join(os.path.expanduser("~"), "Desktop")
             if not os.path.exists(desktop):
                 desktop = os.path.join(os.path.expanduser("~"), "OneDrive", "Desktop")
@@ -15636,6 +16540,11 @@ class OnboardingWindow(QWidget):
                 return
 
             target_path = os.path.join(desktop, "PickOS.lnk")
+
+            # ★ 新增：检查是否已经存在（安装包可能已经创建过了）
+            if os.path.exists(target_path):
+                show_toast(self, "桌面上已存在 PickOS 快捷方式，无需重复创建", "info")
+                return  # 直接结束，不往下覆盖
 
             # 2. 动态区分打包与源码环境
             if getattr(sys, "frozen", False):
@@ -15664,11 +16573,9 @@ class OnboardingWindow(QWidget):
             shortcut.Description = "PickOS 班级管理系统"
             shortcut.Save()
 
-            # === 修改这里：替换为和 _show_success_tip 一样的新拟物风格弹窗 ===
             self._show_shortcut_success_tip()
 
         except Exception as e:
-            # 将详细错误堆栈写入日志或控制台，便于排查
             traceback.print_exc()
             QMessageBox.warning(
                 self,
@@ -15778,22 +16685,20 @@ if __name__ == "__main__":
             print("🔓 密码未设置，跳过验证")
             return True
 
-        # ---- 智能解锁：检测已绑定的移动磁盘 ----
+        # ---- 智能解锁：先检测开发者 U 盘，再检测已绑定的普通磁盘 ----
         try:
-            if is_smart_unlock_available():
-                print("🔓 智能解锁成功：检测到已绑定的移动磁盘")
-                # 新拟物风格成功提示（自动消失 1.8 秒，不打断启动流程）
-                try:
-                    _cfg = load_config()
-                    _dev = _cfg.get("smart_unlock_device", {}) or {}
-                    _label = _dev.get("label", "已绑定的移动磁盘")
-                    toast = _NeuAutoToast(
-                        f"🔓 智能解锁成功\n检测到设备：{_label}",
-                        duration=1800,
-                    )
-                    toast.exec()
-                except Exception as _e:
-                    print(f"⚠️ 智能解锁提示显示失败：{_e}")
+            # 1) 开发者 U 盘：不受智能解锁开关影响
+            dev = find_developer_usb()
+            if dev is not None:
+                print("开发者智能解锁成功：最高管理员权限")
+                show_smart_unlock_toast(dev, is_developer=True)
+                return True
+
+            # 2) 普通智能解锁：要求开关已开启且磁盘已绑定
+            bound = find_bound_smart_unlock_device()
+            if bound is not None:
+                print("智能解锁成功：检测到已绑定的移动磁盘")
+                show_smart_unlock_toast(bound, is_developer=False)
                 return True
         except Exception as e:
             print(f"⚠️ 智能解锁检测失败：{e}")
@@ -15902,8 +16807,33 @@ if __name__ == "__main__":
         win.setWindowOpacity(0.0)
         win.show()
 
+        def _center_and_resize():
+            try:
+                # ★ 用窗口当前所在屏幕（多显示器友好），而不是 primaryScreen
+                scr = win.screen() or QApplication.primaryScreen()
+                if scr is None:
+                    return
+                avail = scr.availableGeometry()
+
+                # ★ 目标尺寸不超过屏幕可用尺寸，否则 WM 会强制压缩 / 移出屏幕
+                target_w = min(1280, avail.width())
+                target_h = min(720, avail.height())
+                win.resize(target_w, target_h)
+
+                # ★ 用窗口"实际尺寸"居中（不是常量 1280×720）
+                x = avail.x() + (avail.width() - win.width()) // 2
+                y = avail.y() + (avail.height() - win.height()) // 2
+                win.move(x, y)
+            except Exception as e:
+                print(f"⚠️ 主窗口重新定位失败: {e}")
+
+        # show 之后延迟一步：让 WM 先完成窗口创建/接管
+        QTimer.singleShot(30, _center_and_resize)
+        # 保险起见，稍晚一点再确认一次（部分系统/主题动画会二次调整窗口）
+        QTimer.singleShot(120, _center_and_resize)
+
         # 主窗口出现时触发粒子
-        QTimer.singleShot(30, lambda: _spawn_close_particles(win))
+        QTimer.singleShot(60, lambda: _spawn_close_particles(win))
 
         anim = QPropertyAnimation(win, b"windowOpacity", win)
         anim.setDuration(700)
