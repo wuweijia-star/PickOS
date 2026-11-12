@@ -16,6 +16,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
+#其实上面这些洋文按看不懂，他们让我开源的话就这样写的
+#话说真的会有人认真看吗
+#
 import sys
 import calendar
 import base64
@@ -60,6 +63,7 @@ from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import QSystemTrayIcon, QMenu
 from PyQt6.QtCore import QUrl
 from PyQt6.QtCore import QMetaObject, Q_ARG, pyqtSlot
+from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from qfluentwidgets import (
     FluentWindow, NavigationItemPosition, FluentIcon,
     setTheme, Theme, setThemeColor, InfoBar, InfoBarPosition,
@@ -68,7 +72,7 @@ from qfluentwidgets import (
 )
 
 
-# ======================== 全局配置 ========================
+# 全局配置
 USER_DIR = "user"                     # 用户数据根目录
 DATA_DIR = os.path.join(USER_DIR, "data")       # 数据文件夹
 EXPORT_DIR = os.path.join(USER_DIR, "exports")  # 导出文件夹
@@ -84,7 +88,7 @@ CLASS_LIST_FILE = os.path.join(DATA_DIR, "班级名单.xlsx")
 DATA_CSV = os.path.join(DATA_DIR, "班级积分记录.csv")
 INSTALL_TIME_STR = "2026-05-01 18:00:00"
 INSTALL_TIMESTAMP = time.mktime(time.strptime(INSTALL_TIME_STR, "%Y-%m-%d %H:%M:%S"))
-SYSTEM_VERSION = "v6.4.0.110"
+SYSTEM_VERSION = "v6.4.1.125"
 
 DIALOG_STYLE = """
     QDialog {
@@ -242,8 +246,8 @@ DIALOG_STYLE = """
     }
 """
 
-# ======================== 自动更新系统 ========================
-CURRENT_VERSION = "v6.4.0.110"
+# 自动更新系统
+CURRENT_VERSION = "v6.4.1.125"
 GITHUB_API_URL = "https://api.github.com/repos/wuweijia-star/PickOS/releases/latest"
 
 class UpdateManager:
@@ -251,7 +255,7 @@ class UpdateManager:
     import certifi
     @staticmethod
     def parse_version(v_str):
-        """将 v6.3.0.135 转换为 (6, 3, 0, 135) 用于比较"""
+        """将 va.b.c.xxx 转换为(a, b, c, xxx)方便对比"""
         try:
             return tuple(map(int, re.findall(r'\d+', v_str)))
         except:
@@ -261,11 +265,11 @@ class UpdateManager:
     def check_update():
         """返回 (是否有更新, 最新版本号, 更新日志, 下载链接)"""
         try:
-            # 1. 构造 SSL 上下文，加载 certifi 提供的根证书
+         
             context = ssl.create_default_context(cafile=certifi.where())
             
             req = urllib.request.Request(GITHUB_API_URL, headers={'User-Agent': 'PickOS-Updater'})
-            # 2. 传入 context
+            # 传入 context
             with urllib.request.urlopen(req, timeout=10, context=context) as response:
                 data = json.loads(response.read().decode('utf-8'))
                 
@@ -274,19 +278,19 @@ class UpdateManager:
             
             # 比较版本
             if UpdateManager.parse_version(latest_version) > UpdateManager.parse_version(CURRENT_VERSION):
-                # ===== 优先找 .exe 安装包 =====
+                #优先找exe安装包
                 installer_url = None
                 fallback_zip = None
                 for asset in data.get("assets", []):
                     name = asset["name"].lower()
                     url = asset["browser_download_url"]
-                    # 安装包判定：后缀 .exe 且文件名含 setup/installer/install/win64
+                 
                     if name.endswith(".exe") and any(
                         k in name for k in ("setup", "installer", "install", "win64")
                     ):
                         installer_url = url
                         break
-                    # 记录一下 zip 作为兜底信息
+                  
                     if "win64.zip" in name:
                         fallback_zip = url
 
@@ -295,7 +299,7 @@ class UpdateManager:
                     if installer_url:
                         print(f"[更新] 找到安装包：{installer_url}")
                     else:
-                        print(f"[更新] ⚠️ 未找到 .exe 安装包，使用 zip 兜底")
+                        print(f"[更新] 未找到 .exe 安装包，使用zip")
                     return True, latest_version, changelog, download_url
             return False, latest_version, changelog, None
         except Exception as e:
@@ -304,7 +308,7 @@ class UpdateManager:
             # 如果包含 SSL 错误，尝试忽略证书重试
             if "SSL" in err_msg or "CERTIFICATE" in err_msg:
                 try:
-                    print("⚠️ 证书验证失败，尝试忽略 SSL 验证重试...")
+                    print("证书验证失败，尝试忽略 SSL 验证重试...")
                     context = ssl._create_unverified_context()
                     req = urllib.request.Request(GITHUB_API_URL, headers={'User-Agent': 'PickOS-Updater'})
                     with urllib.request.urlopen(req, timeout=10, context=context) as response:
@@ -342,7 +346,7 @@ class UpdateManager:
     def _mirror_urls(original_url):
         """
         给 GitHub 原始下载链接生成一组候选：
-        先试国内镜像（大概率快），最后才试 GitHub 原站（兜底）。
+        先试国内镜像（大概率快），最后才试 GitHub 原站
         """
         if "github.com" not in (original_url or ""):
             return [original_url]
@@ -355,31 +359,26 @@ class UpdateManager:
             "https://ghproxy.homeboyc.cn/",
         ]
         urls = [p + original_url for p in prefixes]
-        urls.append(original_url)          # 最后一个，原站兜底
+        urls.append(original_url)          
         return urls
 
     @staticmethod
     def download_installer(url, progress_callback=None):
-        """
-        下载安装包（.exe）到临时目录。
-        :param url: 安装包 URL
-        :param progress_callback: 进度回调，接收 0-100 整数
-        :return: 本地安装包路径，失败返回 None
-        """
+        """下载到 TEMP/PickOS_Update/，返回本地路径，失败返回 None"""
         try:
-            # 1. 准备临时目录
+            #  准备临时目录
             temp_dir = os.path.join(os.environ["TEMP"], "PickOS_Update")
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
             os.makedirs(temp_dir)
 
-            # 2. 从 URL 解析文件名
+            #  从 URL 解析文件名
             filename = url.split("/")[-1].split("?")[0]
             if not filename.lower().endswith(".exe"):
                 filename = "PickOS_Setup.exe"
             installer_path = os.path.join(temp_dir, filename)
 
-            # 3. 多镜像依次尝试
+            # 多镜像依次尝试
             response = None
             last_err = None
             for try_url in UpdateManager._mirror_urls(url):
@@ -413,7 +412,7 @@ class UpdateManager:
             if response is None:
                 raise last_err if last_err else Exception("所有下载源均不可用")
 
-            # 4. 写盘
+           
             with response as res, open(installer_path, "wb") as f:
                 total_size = int(res.info().get('Content-Length', 0))
                 downloaded = 0
@@ -436,8 +435,9 @@ class UpdateManager:
     @staticmethod
     def run_installer_and_exit(installer_path):
         """
-        启动安装程序并退出当前程序。
-        安装程序自己处理文件覆盖、提示用户下一步，比手搓 bat 稳。
+        启动安装包，本程序光荣退休
+        文件覆盖、用户提示全甩给安装程序
+        咱们手搓 bat 那种土办法，还是留给上古时代吧
         """
         try:
             if not installer_path or not os.path.exists(installer_path):
@@ -446,7 +446,7 @@ class UpdateManager:
 
             app = QApplication.instance()
 
-            # 1. 隐藏所有托盘图标
+            # 隐藏所有托盘图标
             try:
                 if app:
                     for w in app.topLevelWidgets():
@@ -458,18 +458,18 @@ class UpdateManager:
             except Exception:
                 pass
 
-            # 2. 启动安装程序
+            # 启动安装程序
             print(f"[更新] 启动安装包：{installer_path}")
             try:
-                os.startfile(installer_path)   # Windows 最干净，无黑窗
+                os.startfile(installer_path)   
             except AttributeError:
-                # 跨平台兜底
+                
                 if sys.platform == "darwin":
                     subprocess.Popen(["open", installer_path])
                 else:
                     subprocess.Popen(["xdg-open", installer_path])
 
-            # 3. 延迟 800ms 退出本程序，让安装程序先启动
+            # 延迟 800ms 退出本程序，让安装程序先启动
             #    用户点"安装"时文件锁已经释放
             if app:
                 QTimer.singleShot(800, app.quit)
@@ -491,7 +491,7 @@ class UpdateManager:
                 shutil.rmtree(temp_dir)
             os.makedirs(temp_dir)
 
-            # ========== 1. 下载：多镜像依次尝试 ==========
+            #多镜像依次尝试
             response = None
             last_err = None
             used_url = None
@@ -549,7 +549,7 @@ class UpdateManager:
                     if progress_callback and total_size > 0:
                         progress_callback(int(downloaded / total_size * 100))
             
-            # 2. 解压
+            # 解压
             extract_dir = os.path.join(temp_dir, "extracted")
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 zip_ref.extractall(extract_dir)
@@ -561,7 +561,7 @@ class UpdateManager:
                     app_dir = root
                     break
 
-            # 3. 生成更新脚本
+            # 生成更新脚本
             current_dir = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
             bat_path = os.path.join(temp_dir, "updater.bat")
             
@@ -601,13 +601,94 @@ exit
     def restart_and_apply(bat_path):
         """执行批处理脚本并退出程序"""
         try:
-            subprocess.Popen(["cmd.exe", "/c", bat_path], creationflags=0x08000000) # CREATE_NO_WINDOW
+            subprocess.Popen(["cmd.exe", "/c", bat_path], creationflags=0x08000000) 
             QApplication.quit()
             sys.exit(0)
         except Exception as e:
             print(f"启动更新脚本失败: {e}")
 
-# ======================== 主题系统 ========================
+class SingleInstanceManager:
+    """保证只运行一个实例"""
+
+    def __init__(self, app_name="PickOS_SingleInstance"):
+        self.server_name = app_name
+        self.local_server = None
+        self._on_activate = None
+
+    def try_notify_existing(self, timeout_ms=1500):
+        """发送激活消息并返回"""
+        socket = QLocalSocket()
+        socket.connectToServer(self.server_name)
+        if socket.waitForConnected(timeout_ms):
+            socket.write(b"SHOW_WINDOW")
+            socket.flush()
+            socket.waitForBytesWritten(1000)
+            try:
+                socket.disconnectFromServer()
+                socket.close()
+            except Exception:
+                pass
+            return True
+        try:
+            socket.abort()
+        except Exception:
+            pass
+        return False
+
+    def start_server(self, on_activate):
+        """接收其他实例的激活请求"""
+        self._on_activate = on_activate
+        self.local_server = QLocalServer()
+        self.local_server.newConnection.connect(self._on_new_connection)
+
+        if self.local_server.listen(self.server_name):
+            return True
+
+        
+        try:
+            QLocalServer.removeServer(self.server_name)
+        except Exception:
+            pass
+
+        if self.local_server.listen(self.server_name):
+            return True
+
+        print(f"服务端监听失败：{self.local_server.errorString()}")
+        return False
+
+    def stop_server(self):
+        """关闭服务端"""
+        try:
+            if self.local_server is not None:
+                self.local_server.close()
+                self.local_server = None
+            QLocalServer.removeServer(self.server_name)
+        except Exception:
+            pass
+
+    def _on_new_connection(self):
+        if self.local_server is None:
+            return
+        conn = self.local_server.nextPendingConnection()
+        if conn is None:
+            return
+        conn.disconnected.connect(conn.deleteLater)
+        conn.readyRead.connect(lambda: self._read_message(conn))
+
+    def _read_message(self, conn):
+        try:
+            data = conn.readAll()
+            if b"SHOW_WINDOW" in data and self._on_activate is not None:
+                self._on_activate()
+        except Exception as e:
+            print(f"处理激活消息失败：{e}")
+        finally:
+            try:
+                conn.disconnectFromServer()
+            except Exception:
+                pass
+
+# 主题系统
 def _hex_to_rgb(hex_color):
     h = str(hex_color).strip().lstrip('#')
     if len(h) == 3:
@@ -658,7 +739,7 @@ THEME_PRESETS = {
 }
 
 def get_theme_colors():
-    """读取当前主题颜色（含自定义），返回 dict。"""
+    """读取当前主题颜色（含自定义），返回 dict"""
     try:
         cfg = load_config()
     except Exception:
@@ -704,7 +785,7 @@ def get_qfluent_theme():
     return Theme.DARK
 
 def _replace_theme_colors(template_str):
-    """把样式表里常见的深色硬编码颜色替换为当前主题色。"""
+    """样式表里那些写死的深色，一个个换成当前主题色，看着舒服多了"""
     c = get_theme_colors()
     replacements = [
         ("#16161E", c["bg"]),
@@ -728,7 +809,7 @@ def _replace_theme_colors(template_str):
     return template_str
 
 
-# ======================== 可滚动表头 ========================
+#可滚动表头
 class ScrollingHeaderView(QHeaderView):
     STEP_PX = 1
     INTERVAL_MS = 80
@@ -741,7 +822,6 @@ class ScrollingHeaderView(QHeaderView):
         super().__init__(orientation, parent)
         self.setHighlightSections(False)
 
-        # ★ 新增：根据当前主题刷新表头滚动文字的颜色，浅色主题下不再出现"深底白字"的错位效果
         try:
             _c = get_theme_colors()
             self.BG_COLOR = _c["bg_card"]
@@ -822,21 +902,21 @@ def install_scrolling_header(table_widget):
 
     header = ScrollingHeaderView(Qt.Orientation.Horizontal, table_widget)
 
-    # 在 setHorizontalHeader 之前，把旧表头的属性拷贝过来
+    # 把旧表头的属性拷贝过来
     if old is not None:
         header.setSectionsClickable(old.sectionsClickable())
-        header.setHighlightSections(False)          # ★ 强制关闭，避免选中行时表头列高亮
+        header.setHighlightSections(False)          #  关掉，防止表头列高亮
         header.setStretchLastSection(old.stretchLastSection())
         header.setDefaultAlignment(old.defaultAlignment())
         header.setSectionsMovable(old.sectionsMovable())
     else:
-        header.setHighlightSections(False)          # ★ 兜底
+        header.setHighlightSections(False)         
 
     table_widget.setHorizontalHeader(header)
     return header
 
-# ======================== 等级系统配置 ========================
-# 等级 -> 四字称号
+#等级系统配置
+
 LEVEL_TITLES = {
     1: "微光初现", 2: "渐露锋芒", 3: "拾光前行",
     4: "星芒见习", 5: "逐光实践", 6: "耀光实干",
@@ -846,7 +926,7 @@ LEVEL_TITLES = {
     20: "万象星穹"
 }
 
-# 等级区间名称（仅用于展示，可省略）
+# 等级区间名称
 LEVEL_RANGES = {
     1: "启行", 2: "启行", 3: "启行",
     4: "历练", 5: "历练", 6: "历练",
@@ -862,11 +942,11 @@ def calculate_level(total_count=None):
         cfg = load_config()
         total_exp = cfg.get("total_experience", 0)
     else:
-        # 如果传入旧参数，视为经验值（兼容）
+        # 传入旧参数，视为经验值
         total_exp = total_count
     return calculate_level_by_exp(total_exp)
 
-# ======================== 经验系统配置 ========================
+#经验系统配置
 # 每日各来源上限
 DAILY_LIMIT_TOTAL = 120          # 每日全局上限
 DAILY_LIMIT_ONLINE = 20          # 在线计时每日上限
@@ -876,7 +956,7 @@ DAILY_LIMIT_RECORD = 60          # 录入记录每日上限
 ONLINE_INTERVAL_SECONDS = 120    # 2分钟
 ONLINE_EXP_PER_INTERVAL = 1
 
-# 签到经验阶梯（连续天数 -> 经验值）
+# 签到经验阶梯
 SIGN_IN_REWARDS = {
     1: 2, 2: 6, 3: 10, 4: 10, 5: 15, 6: 15,
 }
@@ -889,9 +969,9 @@ RECORD_EXP_PER_ENTRY = 2
 # 设备运行：每天 +50
 DEVICE_RUNTIME_DAILY_EXP = 50
 
-# ---- 升级所需经验值（1~20级） ----
+# 升级所需经验值
 LEVEL_EXP_REQUIREMENTS = {
-    1: 0,      # 初始等级1，需要0经验
+    1: 0,      
     2: 50,
     3: 150,
     4: 300,
@@ -914,9 +994,9 @@ LEVEL_EXP_REQUIREMENTS = {
 }
 MAX_LEVEL = 20
 
-# ======================== 成就列表 ========================
+#成就列表
 ACHIEVEMENT_LIST = [
-    # ========== 每级升级成就 Lv2‑Lv20 ==========
+   
     {"aid":"lv_2","name":"锋芒初露","desc":"等级提升至 Lv.2","exp":20},
     {"aid":"lv_3","name":"拾光启程","desc":"等级提升至 Lv.3","exp":30},
     {"aid":"lv_4","name":"星芒见习","desc":"等级提升至 Lv.4","exp":40},
@@ -937,19 +1017,19 @@ ACHIEVEMENT_LIST = [
     {"aid":"lv_19","name":"极星领航","desc":"等级提升至 Lv.19","exp":800},
     {"aid":"lv_20","name":"万象星穹","desc":"抵达满级 Lv.20","exp":1000},
 
-    # ========== 使用历程 ==========
+    #使用历程
     {"aid":"first_launch","name":"初次启幕","desc":"第一次启动PickOS系统","exp":30},
     {"aid":"walk_10day","name":"十日相伴","desc":"累计使用系统满10天","exp":80},
     {"aid":"walk_30day","name":"月度同行","desc":"累计使用系统满30天","exp":180},
     {"aid":"walk_100day","name":"百秩征途","desc":"累计使用系统满100天","exp":400},
 
-    # ========== 导入成绩（新增） ==========
+    # 导入成绩
     {"aid":"import_1","name":"初导名册","desc":"第一次导入成绩/学生名单","exp":40},
     {"aid":"import_3","name":"三番汇册","desc":"累计导入成绩/学生名单3次","exp":100},
     {"aid":"import_5","name":"五度整编","desc":"累计导入成绩/学生名单5次","exp":200},
     {"aid":"import_10","name":"十载汇录","desc":"累计导入成绩/学生名单10次","exp":350},
 
-    # ========== 录入记录 ==========
+    #录入记录
     {"aid":"record_first","name":"落笔初记","desc":"录入第一条班级加减分记录","exp":40},
     {"aid":"record_100","name":"百册留痕","desc":"累计录入100条积分记录","exp":150},
     {"aid":"record_500","name":"台账盈积","desc":"累计录入500条积分记录","exp":350},
@@ -959,12 +1039,12 @@ ACHIEVEMENT_LIST = [
     {"aid":"record_50000","name":"瀚卷浩册","desc":"累计录入50000条积分记录","exp":2400},
     {"aid":"record_100000","name":"鸿篇巨录","desc":"累计录入100000条积分记录","exp":3200},
 
-    # ========== 签到 ==========
+    #签到
     {"aid":"sign_7","name":"七日不渝","desc":"达成连续签到7天","exp":120},
     {"aid":"sign_30","name":"月余坚守","desc":"达成连续签到30天","exp":300},
     {"aid":"sign_50","name":"半岁恒心","desc":"达成连续签到50天","exp":450},
 
-    # ========== 导出备份探索 ==========
+    #导出备份探索
     {"aid":"export_first","name":"数表初成","desc":"第一次导出Excel汇总表格","exp":60},
     {"aid":"backup_first","name":"存鉴留档","desc":"完成第一次数据备份","exp":60}
 ]
@@ -980,8 +1060,8 @@ def reset_daily_experience_if_needed():
     if last_date != today:
         cfg["today_experience"] = 0
         cfg["online_seconds_today"] = 0
-        cfg["today_record_exp"] = 0        # 之前漏掉的
-        cfg["today_online_exp"] = 0        # 之前漏掉的
+        cfg["today_record_exp"] = 0        
+        cfg["today_online_exp"] = 0        
         cfg["last_online_update"] = time.time()  # 重置为当前时间，避免跨天时用旧时间戳
         cfg["last_experience_date"] = today
         save_config(cfg)
@@ -1001,14 +1081,7 @@ def can_add_experience(amount):
     return amount <= get_remaining_today_exp()
 
 def add_experience(amount, source="未知", check_limit=True, update_daily=True):
-    """
-    添加经验（核心函数）
-    :param amount: 经验值（正数）
-    :param source: 来源描述（用于日志）
-    :param check_limit: 是否检查每日上限
-    :param update_daily: 是否计入今日经验（不影响总经验）
-    :return: (是否成功, 实际添加的经验值, 是否升级)
-    """
+    """加经验，check_limit=False 不查每日上限，update_daily=False 不算进今日的"""
     if amount <= 0:
         return False, 0, False
     
@@ -1056,7 +1129,7 @@ def add_experience(amount, source="未知", check_limit=True, update_daily=True)
     
 
 def calculate_level_by_exp(total_exp):
-    """根据总经验计算等级（1~20）"""
+    """按总经验算等级，1 到 20，慢慢练吧~反正我给自己叠满喽~"""
     level = 1
     for lv, exp_req in LEVEL_EXP_REQUIREMENTS.items():
         if total_exp >= exp_req:
@@ -1081,11 +1154,12 @@ def get_level_progress(total_exp=None):
     progress = (total_exp - current_req) / (next_req - current_req) * 100
     return total_exp, next_req - total_exp, min(100, progress)
 
-# 主窗口是否已完成"启动后置任务"（新手引导期间不弹成就/升级通知）
+# 本来是个 bool，用 dict 是为了能在函数里改值
+# 改成 bool 得用 global，试过，编译器报错一堆，就这个方案最省事
 POST_BOOT_READY = {"value": False}
 
 def show_level_up_notification(new_level):
-    """显示升级通知（自定义弹窗，跟随主题）"""
+    """升级喽，蹦个自定义弹窗庆祝一下，生活要有仪式感"""
     from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
     title = LEVEL_TITLES.get(new_level, "未知")
     _c = get_theme_colors()
@@ -1093,7 +1167,7 @@ def show_level_up_notification(new_level):
     dialog = QDialog()
     dialog.setWindowTitle("🎉 升级")
     dialog.setFixedSize(400, 200)
-    dialog.setStyleSheet(DIALOG_STYLE)   # ✅ 跟随主题
+    dialog.setStyleSheet(DIALOG_STYLE)   # 跟随主题
 
     layout = QVBoxLayout(dialog)
     layout.setContentsMargins(20, 20, 20, 20)
@@ -1120,7 +1194,7 @@ def show_level_up_notification(new_level):
     dialog.move(screen.center() - dialog.rect().center())
     dialog.exec()
 
-# ======================== 成就系统核心 ========================
+#成就系统核心
 def get_achievement_by_id(aid):
     for ach in ACHIEVEMENT_LIST:
         if ach["aid"] == aid:
@@ -1132,7 +1206,7 @@ def is_achievement_unlocked(aid):
     return cfg.get("achievements", {}).get(aid, False)
 
 def unlock_achievement(aid, show_notification=True):
-    """解锁成就，发放经验，保存状态，弹窗"""
+    """将经验狠狠拿下"""
     if is_achievement_unlocked(aid):
         return False
     ach = get_achievement_by_id(aid)
@@ -1151,14 +1225,14 @@ def unlock_achievement(aid, show_notification=True):
     return True
 
 def show_achievement_notification(ach, exp):
-    """自定义通知弹窗（跟随主题）"""
+    """自定义通知弹窗，狠狠的夸"""
     from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
     _c = get_theme_colors()
 
     dialog = QDialog()
     dialog.setWindowTitle("🎉 解锁成就")
     dialog.setFixedSize(420, 200)
-    dialog.setStyleSheet(DIALOG_STYLE)   # ✅ 不再硬编码
+    dialog.setStyleSheet(DIALOG_STYLE)   # 不再硬编码
 
     layout = QVBoxLayout(dialog)
     layout.setContentsMargins(20, 20, 20, 20)
@@ -1169,7 +1243,7 @@ def show_achievement_notification(ach, exp):
     layout.addWidget(title, alignment=Qt.AlignmentFlag.AlignCenter)
 
     desc = QLabel(ach['desc'])
-    desc.setStyleSheet(f"color: {_c['fg']}; font-size: 14px;")   # ✅ 跟随主题
+    desc.setStyleSheet(f"color: {_c['fg']}; font-size: 14px;")   # 跟随主题
     layout.addWidget(desc, alignment=Qt.AlignmentFlag.AlignCenter)
 
     exp_label = QLabel(f"获得 {exp} 经验")
@@ -1252,7 +1326,7 @@ def get_main_window():
     """获取主窗口实例"""
     from PyQt6.QtWidgets import QApplication
     return getattr(QApplication.instance(), 'main_window', None)
-# ======================== 配置文件管理（与原版相同） ========================
+#配置文件管理
 def load_config():
     default = {
         "student_file": DEFAULT_STUDENT_EXCEL,
@@ -1283,31 +1357,31 @@ def load_config():
         "overview_top_n": 5,
         "overview_rank_by": "赋分班名",
         "total_records_count": 0,
-        "total_experience": 0,              # 累计总经验（用于计算等级）
+        "total_experience": 0,              # 累计总经验用于计算等级
         "today_experience": 0,              # 今日已获得经验
-        "last_experience_date": "",         # 上次获得经验的日期（用于重置每日计数）
+        "last_experience_date": "",         # 上次获得经验的日期用于重置每日计数
         "sign_in_streak": 0,                # 连续签到天数
         "last_sign_in_date": "",            # 上次签到日期
-        "online_seconds_today": 0,          # 今日在线秒数（用于在线计时经验）
+        "online_seconds_today": 0,          # 今日在线秒数用于在线计时经验
         "last_online_update": 0.0,          # 上次更新在线时间的时间戳
         "last_device_day": "",              # 上次领取设备运行经验的天数
-        "achievements": {},                 # 成就领取记录 {"成就ID": True}
+        "achievements": {},                 # 成就领取记录
         "device_total_days_recorded": 0,
         "import_count": 0,          # 导入成绩次数
         "export_count": 0,          # 导出表格次数
         "backup_count": 0,
         "recent_records_limit": 100,   # 最近录入记录显示条数
         "enable_progress_animation": True,
-        "enable_particle_effect": True,      # ← 新增：弹窗关闭粒子效果
-        "enable_click_particle_effect": True,   # ← 新增：鼠标点击粒子
-        "enable_drag_particle_effect": True,   # ← 新增：拖动拖尾粒子
-        "enable_scroll_particle_effect": True, # ← 新增：鼠标滚动粒子
-        "enable_nav_animation": True,          # ← 新增：导航栏切换动画
-        # ---- 主题 ----
+        "enable_particle_effect": True,      # 弹窗关闭粒子效果
+        "enable_click_particle_effect": True,   # 鼠标点击粒子
+        "enable_drag_particle_effect": True,   # 拖动拖尾粒子
+        "enable_scroll_particle_effect": True, # 鼠标滚动粒子
+        "enable_nav_animation": True,          #导航栏切换动画
+        # 主题 
         "theme_mode": "light",          # dark / light / custom
         "theme_bg": "#16161E",         # 自定义模式下的窗口颜色
         "theme_fg": "#E0E0E0",         # 自定义模式下的文字颜色
-        # 按类型分别保留条数（每种类型各自独立计数）
+        # 按类型分别保留条数
         "export_keep_counts": {
             "班级积分月度汇总": 5,
             "成绩总览对比": 5,
@@ -1319,14 +1393,23 @@ def load_config():
             "积分记录": 5,
             "其它": 5,
         },
-        # ---- 密码保护 ----
-        "password_enabled": False,     # ← 新增
-        "password_hash": "",           # ← 新增
-        "anti_peek_enabled": False,    # ← 新增：防窥模式
-        # ---- 智能解锁（U 盘） ----
+        #自定义科目
+        "custom_subjects": [
+            {"name": "语文", "use_assign": False},
+            {"name": "数学", "use_assign": False},
+            {"name": "英语", "use_assign": False},
+            {"name": "物理", "use_assign": False},
+            {"name": "化学", "use_assign": True},
+            {"name": "生物", "use_assign": True},
+        ],
+        # 密码保护
+        "password_enabled": False,     
+        "password_hash": "",           
+        "anti_peek_enabled": False,    
+        # 智能解锁
         "smart_unlock_enabled": False,
         "smart_unlock_device": [],          
-        "onboarding_completed": False,   # ← 新增：是否已完成新手引导
+        "onboarding_completed": False,   # 是否已完成新手引导
     }
     if os.path.exists(CONFIG_JSON):
         try:
@@ -1338,7 +1421,7 @@ def load_config():
             if cfg.get("install_time", 0) < 1700000000:
                 cfg["install_time"] = time.time()
 
-            # ---- 兼容旧版单个 dict 配置，并统一为 list（最多 3 个） ----
+          
             dev = cfg.get("smart_unlock_device", [])
             if isinstance(dev, dict):
                 dev = [dev] if dev and dev.get("serial") else []
@@ -1361,14 +1444,14 @@ def load_config():
     return default
 
 def save_config(cfg):
-    """原子写入：先写临时文件，再替换，避免写一半被中断导致配置损坏"""
+    """原子写，先写 .tmp 再替换，半路断电也不会写出个坏 json，机智如我"""
     tmp_path = CONFIG_JSON + ".tmp"
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(cfg, f, ensure_ascii=False, indent=2)
         os.replace(tmp_path, CONFIG_JSON)   # 原子替换
     except Exception as e:
-        # 兜底：直接写，至少保证有配置
+     
         try:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
@@ -1376,6 +1459,61 @@ def save_config(cfg):
             pass
         with open(CONFIG_JSON, "w", encoding="utf-8") as f:
             json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+DEFAULT_SUBJECTS = [
+    {"name": "语文", "use_assign": False},
+    {"name": "数学", "use_assign": False},
+    {"name": "英语", "use_assign": False},
+    {"name": "物理", "use_assign": False},
+    {"name": "化学", "use_assign": True},
+    {"name": "生物", "use_assign": True},
+]
+
+
+def get_custom_subjects():
+    """每项name是科目名，use_assign是是否使用赋分列"""
+    try:
+        cfg = load_config()
+    except Exception:
+        return [dict(s) for s in DEFAULT_SUBJECTS]
+
+    subjects = cfg.get("custom_subjects", None)
+    if not isinstance(subjects, list) or not subjects:
+        return [dict(s) for s in DEFAULT_SUBJECTS]
+
+    clean = []
+    seen = set()
+    for s in subjects:
+        if isinstance(s, dict) and s.get("name"):
+            name = str(s["name"]).strip()
+            if name and name not in seen:
+                seen.add(name)
+                clean.append({
+                    "name": name,
+                    "use_assign": bool(s.get("use_assign", False)),
+                })
+        elif isinstance(s, str) and s.strip():
+            name = s.strip()
+            if name not in seen:
+                seen.add(name)
+                clean.append({"name": name, "use_assign": False})
+    return clean if clean else [dict(s) for s in DEFAULT_SUBJECTS]
+
+
+def resolve_subject_column(subject, df_columns):
+    """根据科目配置和实际数据列"""
+    if not subject:
+        return None
+    name = subject.get("name", "")
+    if not name:
+        return None
+    if subject.get("use_assign"):
+        assign_col = f"{name}赋分"
+        if assign_col in df_columns:
+            return assign_col
+    if name in df_columns:
+        return name
+    return None
 
 def read_config():
     cfg = load_config()
@@ -1427,7 +1565,7 @@ def save_custom_lists(lists):
     with open(CUSTOM_LISTS_FILE, "w", encoding="utf-8") as f:
         json.dump(lists, f, ensure_ascii=False, indent=2)
 
-# ======================== 备份管理器（与原版相同） ========================
+# 备份管理器
 class BackupManager:
     def __init__(self, backup_dir="backups", max_backups=10):
         self.backup_dir = backup_dir
@@ -1490,7 +1628,7 @@ class BackupManager:
     def get_score_backups(self):
         return sorted(glob.glob(os.path.join(self.backup_dir, "积分记录_*.csv")))
 
-# ======================== 数据层函数（与原版相同） ========================
+#数据层函数
 def load_student_list(file_path):
     try:
         df_stu = pd.read_excel(file_path, engine="openpyxl")
@@ -1527,20 +1665,20 @@ def save_score_record(stu_id, name, date_str, op, category, score, note, assign_
         df.to_csv(DATA_CSV, index=False, encoding="utf-8-sig")
         
 
-        # ---- 新增：累计计数 +1 ----
+        # 累计计数
         cfg = load_config()
         cfg["total_records_count"] = cfg.get("total_records_count", 0) + 1
         save_config(cfg)
 
-        # ---- 新增：录入记录经验 +2（受每日上限和子上限限制） ----
-        # 检查记录子上限（每日最多60经验，即30条）
+        # 录入记录经验 +2
+     
         today = get_today_date()
         today_record_exp = cfg.get("today_record_exp", 0)
         if today_record_exp < DAILY_LIMIT_RECORD:
-            # 计算本次可获得经验（每条+2，最多到子上限）
+            # 计算本次可获得经验
             exp_gain = min(RECORD_EXP_PER_ENTRY, DAILY_LIMIT_RECORD - today_record_exp)
             if exp_gain > 0:
-                # 尝试添加经验（会自动检查全局上限）
+                # 尝试添加经验
                 success, actual, is_level_up = add_experience(exp_gain, "录入记录")
                 if success:
                     # 更新今日记录经验计数
@@ -1694,16 +1832,16 @@ def import_assign_scores(stu_df, excel_path, discount=100):
             save_config(cfg)
             check_and_unlock_achievements()
 
-            # ---- 新增：累计计数增加 ----
+            # 累计计数增加
             cfg = load_config()
             cfg["total_records_count"] = cfg.get("total_records_count", 0) + len(new_records)
             save_config(cfg)
 
-            # ---- 新增：批量导入经验（每条+2，受每日上限和子上限限制） ----
+            # 批量导入经验
             today = get_today_date()
             cfg = load_config()
             today_record_exp = cfg.get("today_record_exp", 0)
-            # 计算可添加的条数（受子上限限制）
+            # 计算可添加的条数
             max_records = (DAILY_LIMIT_RECORD - today_record_exp) // RECORD_EXP_PER_ENTRY
             if max_records > 0:
                 exp_count = min(len(new_records), max_records)
@@ -1818,6 +1956,7 @@ def export_excel_with_template(stu_df, template_path, month=None, output_name=No
         row_idx = 2
         for _, row_data in all_stu.iterrows():
             if '班级' in col_map:
+                # 硬编码695是我们班的班号，别的班拿去用自己改，我看后面能不能加一下自定义吧
                 ws.cell(row=row_idx, column=col_map['班级'], value=695)
             ws.cell(row=row_idx, column=col_map['学号'], value=row_data['学号'])
             ws.cell(row=row_idx, column=col_map['姓名'], value=row_data['姓名'])
@@ -1933,7 +2072,7 @@ def export_excel_fallback(stu_df, month=None, output_name=None):
         return False, f" 导出失败：{e}"
 
 def export_score_overview(output_name=None):
-    """导出成绩总览对比表（与成绩界面总览显示完全一致）"""
+    """导出成绩总览对比表"""
     if not os.path.exists(CURRENT_SCORES_FILE) or not os.path.exists(PREVIOUS_SCORES_FILE):
         return False, "缺少本次或上次考试数据，无法导出总览"
 
@@ -1949,7 +2088,7 @@ def export_score_overview(output_name=None):
     current["学号"] = current["学号"].astype(str)
     previous["学号"] = previous["学号"].astype(str)
 
-    # 合并数据（与 display_overview 完全一致）
+    # 合并数据
     merged = pd.merge(current, previous, on="学号", how="outer", suffixes=("_本次", "_上次"))
     merged["姓名"] = merged["姓名_本次"].fillna(merged["姓名_上次"])
 
@@ -2053,7 +2192,7 @@ def export_score_overview(output_name=None):
     except Exception as e:
         return False, f" 导出失败：{e}"
 
-# ======================== Toast 通知 ========================
+# Toast通知
 def show_toast(parent, msg, type_="info", duration=2000):
     titles = {
         "success": "成功",
@@ -2075,9 +2214,9 @@ def show_toast(parent, msg, type_="info", duration=2000):
         InfoBar.info(title=title, content=msg, parent=parent,
                      position=InfoBarPosition.TOP_RIGHT, duration=duration)
 
-# ======================== 弹窗关闭粒子效果（HarmonyOS 风格） ========================
+# 弹窗关闭粒子效果
 class ParticleOverlay(QWidget):
-    """全屏透明覆盖层：从弹窗区域向外散开的粒子动画"""
+    """弹窗一关，粒子炸开——全屏透明覆盖层，看着就爽"""
 
     _active = []          # 当前存活的叠加层实例
     _MAX_ACTIVE = 6       # 同时最多保留的粒子层数
@@ -2102,10 +2241,9 @@ class ParticleOverlay(QWidget):
         self.setGeometry(screen)
 
         # 粒子数量取决于弹窗面积
-        # ★ 粒子数量：大幅提升
         area = max(1, int(width) * int(height))
         if area < 6000:
-            # 很小的窗口（如 48×48 的悬浮窗）少放一些，看起来才自然
+            # 很小的窗口少放一些，看起来自然
             num_particles = max(60, min(140, area // 25))
         else:
             num_particles = max(220, min(650, area // 200))
@@ -2115,7 +2253,7 @@ class ParticleOverlay(QWidget):
             px = center_x + random.uniform(-width / 2.0, width / 2.0)
             py = center_y + random.uniform(-height / 2.0, height / 2.0)
 
-            # 以弹窗中心为基准的离心方向（略微随机扰动）
+            # 以弹窗中心为基准
             dx = px - center_x
             dy = py - center_y
             base_angle = math.atan2(dy, dx) if (dx or dy) else random.uniform(0, 2 * math.pi)
@@ -2222,7 +2360,7 @@ class ClickParticleOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
-        # 覆盖整个屏幕即可
+      
         try:
             screen = QApplication.primaryScreen().geometry()
         except Exception:
@@ -2311,7 +2449,7 @@ class ClickParticleOverlay(QWidget):
             painter.drawEllipse(QPointF(p["x"], p["y"]), s, s)
 
 class DragParticleOverlay(QWidget):
-    """拖动拖尾粒子层：单例，持续接收坐标，在鼠标路径上追加小粒子"""
+    """拖哪跟哪的粒子尾迹，全局单例，一路火花带闪电"""
 
     _instance = None
     _MAX_PARTICLES = 1800       # 池子上限，超出时裁剪最旧的
@@ -2344,7 +2482,7 @@ class DragParticleOverlay(QWidget):
         self._timer.timeout.connect(self._step)
         self._timer.start()
 
-    # ---------- 单例入口 ----------
+    # 单例入口
     @classmethod
     def get_instance(cls):
         if cls._instance is None or not cls._instance.isVisible():
@@ -2358,27 +2496,26 @@ class DragParticleOverlay(QWidget):
             cls._instance.raise_()
         return cls._instance
 
-    # ---------- 外部接口：追加一批粒子 ----------
-        # ---------- 外部接口：追加一批粒子 ----------
+  
     def add_point(self, x, y):
         self._idle_frames = 0
-        # ★ 每次采样追加 10~16 颗，尾迹更浓密
+        # 增加尾迹粒子
         num = random.randint(10, 16)
         for _ in range(num):
-            # 让粒子稍微围绕路径散开一点，形成"云带"而不是一条细线
+            # 让粒子稍微围绕路径散开一点
             offset_x = random.uniform(-4.0, 4.0)
             offset_y = random.uniform(-4.0, 4.0)
 
             angle = random.uniform(0, 2 * math.pi)
-            speed = random.uniform(0.5, 2.4)   # ★ 扩散略微加大
+            speed = random.uniform(0.5, 2.4)   # 加一点点扩散
             vx = math.cos(angle) * speed
             vy = math.sin(angle) * speed + random.uniform(0.15, 0.9)
 
-            size = random.uniform(1.8, 4.2)    # ★ 粒子更大
-            max_life = random.randint(22, 42)  # ★ 存活更久
+            size = random.uniform(1.8, 4.2)    # 让粒子更大
+            max_life = random.randint(22, 42)  # 停留跟就时间
 
-            # 拖尾色调偏亮青蓝，和点击粒子/关闭粒子形成统一语言
-            # 额外加入亮白色高光粒子，视觉更闪耀
+    
+            # 额外加入亮白色高光粒子
             if random.random() < 0.18:
                 r, g, b = 230, 240, 255
             else:
@@ -2399,7 +2536,7 @@ class DragParticleOverlay(QWidget):
         if len(self.particles) > self._MAX_PARTICLES:
             self.particles = self.particles[-self._MAX_PARTICLES:]
 
-    # ---------- 逐帧推进 ----------
+    #  逐帧推进
     def _step(self):
         any_alive = False
         for p in self.particles:
@@ -2453,11 +2590,11 @@ def _spawn_drag_particles(global_x, global_y):
         overlay = DragParticleOverlay.get_instance()
         overlay.add_point(global_x, global_y)
     except Exception as e:
-        print(f"⚠️ 拖动粒子异常: {e}")
+        print(f"拖动粒子异常: {e}")
 
 
 def _spawn_click_particles(global_x, global_y):
-    """在全局坐标处溅射一次点击粒子（带间隔保护）"""
+    """点击位置溅一圈粒子，带间隔保护防止连点把屏幕怼爆"""
     try:
         if not load_config().get("enable_click_particle_effect", True):
             return
@@ -2469,7 +2606,7 @@ def _spawn_click_particles(global_x, global_y):
         overlay = ClickParticleOverlay(global_x, global_y)
         overlay.show()
     except Exception as e:
-        print(f"⚠️ 点击粒子异常: {e}")
+        print(f"点击粒子异常: {e}")
 
 class ScrollParticleOverlay(QWidget):
     """滚动粒子：鼠标滚轮滚动时，在光标位置溅射一圈偏向上的小粒子"""
@@ -2595,7 +2732,7 @@ def _spawn_scroll_particles(global_x, global_y):
         overlay = ScrollParticleOverlay(global_x, global_y)
         overlay.show()
     except Exception as e:
-        print(f"⚠️ 滚动粒子异常: {e}")
+        print(f"滚动粒子异常: {e}")
 
 
 def _spawn_close_particles(widget):
@@ -2617,23 +2754,22 @@ def _spawn_close_particles(widget):
         overlay = ParticleOverlay(cx, cy, rect.width(), rect.height())
         overlay.show()
     except Exception as e:
-        print(f"⚠️ 粒子效果异常: {e}")
+        print(f"粒子效果异常: {e}")
 
 
 class ParticleEventFilter(QObject):
-    """全局事件过滤器：
-       - QDialog 隐藏 → 关闭粒子
-       - 鼠标左键按下 → 点击粒子
-       - 鼠标左键按住拖动 → 拖尾粒子
-    只在读取事件坐标，从不 consume 事件（返回 False），
-    因此对悬浮窗拖动、滚动条、窗口拖动等一切正常交互零影响。
+    """全局事件过滤器，五感俱全：
+弹窗一关，粒子腾起
+左键按下，点击粒子
+按住拖动，拖尾粒子
+滚轮一转，滚动粒子
+全程只读事件不拦截，对悬浮窗、滚动条、窗口拖动零干扰。
     """
 
-    # ★ 新增：应用就绪标志。主窗口完全构造完成后才置 True，
-    #   开机动画阶段 / 主窗口构造阶段所有粒子触发都被屏蔽。
+    #   开机动画阶段所有粒子触发都被屏蔽
     _app_ready = False
 
-    # ---- 拖动状态（类级别，跨事件共享）----
+    
     _mouse_pressed = False
     _last_drag_pos = None
     _last_drag_ts = 0.0
@@ -2641,14 +2777,14 @@ class ParticleEventFilter(QObject):
     _DRAG_MIN_INTERVAL = 0.011     # ~90Hz 采样上限
 
     def eventFilter(self, obj, event):
-        # ★ 应用还没就绪：原样放行所有事件，不触发任何粒子
+        # 应用还没就绪不触发任何粒子
         if not ParticleEventFilter._app_ready:
             return False
         
         try:
             et = event.type()
 
-            # ---- 1. 弹窗隐藏：关闭粒子 ----
+            #  弹窗隐藏
             if isinstance(obj, QDialog):
                 if et == QEvent.Type.Hide:
                     if not getattr(obj, "_particle_hide_emitted", False):
@@ -2657,7 +2793,7 @@ class ParticleEventFilter(QObject):
                 elif et == QEvent.Type.Show:
                     obj._particle_hide_emitted = False
 
-            # ---- 2. 鼠标事件 ----
+            #  鼠标事件 
             if et == QEvent.Type.MouseButtonPress:
                 try:
                     if hasattr(event, "button") and event.button() == Qt.MouseButton.LeftButton:
@@ -2681,7 +2817,7 @@ class ParticleEventFilter(QObject):
             elif et == QEvent.Type.MouseMove:
                 if ParticleEventFilter._mouse_pressed:
                     try:
-                        # buttons() 更可靠，某些环境事件序列不完整
+                        
                         btns = getattr(event, "buttons", None)
                         if btns is not None and callable(btns):
                             if not (btns() & Qt.MouseButton.LeftButton):
@@ -2708,7 +2844,7 @@ class ParticleEventFilter(QObject):
                     except Exception:
                         pass
 
-            # ★ 新增：鼠标滚轮滚动 → 滚动粒子
+            # 鼠标滚轮粒子
             elif et == QEvent.Type.Wheel:
                 try:
                     gp = event.globalPosition().toPoint()
@@ -2719,17 +2855,13 @@ class ParticleEventFilter(QObject):
         except Exception:
             pass
 
-        # ★ 关键：始终返回 False，绝不拦截事件，保证拖动功能不受影响
+        
         return False
 
-# ======================== 进度条动画通用工具 ========================
+#进度条动画通用工具
 def animate_progress_bar(progress_bar, target_value, duration=1800):
     """
-    为进度条添加从 0 到目标值的缓动动画。
-    是否动画由全局配置 enable_progress_animation 决定。
-    :param progress_bar: 目标 QProgressBar
-    :param target_value: 目标值（会转为 int）
-    :param duration: 动画时长（毫秒），默认 1800
+    0 慢慢推到 target_value，开关在 enable_progress_animation，用户想关就关不强求
     """
     if progress_bar is None:
         return
@@ -2741,7 +2873,7 @@ def animate_progress_bar(progress_bar, target_value, duration=1800):
         progress_bar.setValue(target_value)
         return
 
-    # 若有旧动画在跑，先停掉（避免重复启动）
+    # 如果旧动画在跑，先停掉
     old = getattr(progress_bar, '_current_anim', None)
     if old is not None:
         try:
@@ -2764,7 +2896,7 @@ def animate_progress_bar(progress_bar, target_value, duration=1800):
     anim.finished.connect(on_finished)
     anim.start()
 
-# ======================== 开机动画（全新实现，复刻旧版效果） ========================
+#开机动画
 import sys
 import math
 import random
@@ -2775,15 +2907,15 @@ from PyQt6.QtWidgets import (
     QApplication, QWidget, QLabel, QProgressBar
 )
 
-# 版本号，可根据需要修改
-SYSTEM_VERSION = "v6.4.0.110"
+
+SYSTEM_VERSION = "v6.4.1.125"
 
 
-# ======================== 支持字体大小属性动画的 QLabel ========================
+
 class AnimatedLabel(QLabel):
-    """支持通过 pyqtProperty 动画化字体大小的 QLabel。"""
+    """支持通过 pyqtProperty 动画化字体大小的 QLabel"""
 
-    # 微软雅黑优先；找不到时回退到 Segoe UI / Inter
+    # 微软雅黑
     FONT_STACK = (
         "'Microsoft YaHei UI', 'Microsoft YaHei', "
         "'Segoe UI', 'Inter', sans-serif"
@@ -2809,7 +2941,7 @@ class AnimatedLabel(QLabel):
         return self._font_size
 
     def set_font_size(self, size):
-        """改变字体大小时保持控件中心位置不变。"""
+        """改变字体大小时保持控件中心位置不变"""
         x, y = self.x(), self.y()
         w, h = self.width(), self.height()
         self._font_size = int(size)
@@ -2820,20 +2952,16 @@ class AnimatedLabel(QLabel):
     font_size = pyqtProperty(int, get_font_size, set_font_size)
 
 
-# ======================== 开机动画 ========================
+#开机动画
 class BootSplash(QWidget):
-    """开机动画：
-        1. 版权信息显示 2 秒（仅版权文字）
-        2. 白色"P"从屏幕下方升起
-        3. "P"缩小，同时"ick"出现，组成"Pick"
-        4. "Pick"向左滑动，蓝色"OS"从右侧滑入，组成"PickOS"
-        5. "OPenPick"从屏幕下方滑入（PickOS 下方）
-        6. "Powered by"一行从中间向两边展开（OPenPick 上方）
+    """开机动画，版权，P升起，P 缩小ick淡入，Pick左移OS滑入，OPenPick上滑，Powered by展开
+
+看一次挺惊艳，看一千次就该设置里关掉了，不然那是真的很爱看了
     """
 
-    FINAL_SIZE = 160        # PickOS 最终字体大小（px）
-    BIG_SIZE = 330          # P 起始字体大小（px）
-    COLOR_PICK = "#FFFFFF"  # Pick 白色
+    FINAL_SIZE = 160        # PickOS最终字体大小
+    BIG_SIZE = 330          # P起始字体大小
+    COLOR_PICK = "#FFFFFF"  # Pick白色
     COLOR_OS = "#2196F3"    
 
     def __init__(self, callback, enable_animation=True):
@@ -2852,10 +2980,10 @@ class BootSplash(QWidget):
         # 自定义属性所用的内部状态
         self._powered_width_value = 0
 
-        # ---------- 阶段 1：版权页（仅版权文字） ----------
+        # 版权页
         self._build_credit_page()
 
-        # ---------- 阶段 2：PickOS 组装标签 ----------
+        # PickOS
         self.p_label = AnimatedLabel("P", self.COLOR_PICK, self.BIG_SIZE, self)
         self.p_label.hide()
 
@@ -2871,7 +2999,7 @@ class BootSplash(QWidget):
             self.height() + 30,
         )
 
-        # ---------- 阶段 3：底部信息 ----------
+        # 底部信息
         self._build_bottom_labels()
 
         self._animations = []
@@ -2884,9 +3012,7 @@ class BootSplash(QWidget):
         else:
             QTimer.singleShot(2000, self._start_animation)
 
-    # ------------------------------------------------------------------
-    # 版权页（只显示版权文字）
-    # ------------------------------------------------------------------
+    
     def _build_credit_page(self):
         self.credit_page = QWidget(self)
         self.credit_page.setGeometry(0, 0, self.width(), self.height())
@@ -2909,11 +3035,9 @@ class BootSplash(QWidget):
 
         layout.addStretch(1)
 
-    # ------------------------------------------------------------------
-    # 底部信息：OPenPick + Powered by（容器 + 子 QLabel）
-    # ------------------------------------------------------------------
+   
     def _build_bottom_labels(self):
-        # ---- OPenPick（位置更低） ----
+        # OPenPick
         self.openpick_label = QLabel("OPenPick", self)
         self.openpick_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.openpick_label.setStyleSheet(
@@ -2929,13 +3053,10 @@ class BootSplash(QWidget):
         self.openpick_label.move(self._openpick_target_x, self.height() + 40)
         self.openpick_label.hide()
 
-        # ---- Powered by：容器裁剪 + 子 QLabel 居中 ----
-        # 思路：容器宽度从 0 缓动到完整宽度，QLabel 始终在容器里居中。
-        # 因为容器设置了 WA_ClipChildren，超出容器的部分会被裁剪，
-        # 视觉上 Powered by 的文字就会从中间向两边"生长"出来。
+   
         self.powered_container = QWidget(self)
         self.powered_container.setStyleSheet("background: transparent;")
-        # Qt6 中 QWidget 的子控件默认会被父控件裁剪，无需 WA_ClipChildren
+ 
 
         self.powered_label = QLabel("—— Powered by ——", self.powered_container)
         self.powered_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -2965,9 +3086,7 @@ class BootSplash(QWidget):
         self.powered_label.move(-self._powered_full_width // 2, 0)
         self.powered_container.hide()
 
-    # ------------------------------------------------------------------
-    # 自定义属性：powered_width（供 QPropertyAnimation 使用）
-    # ------------------------------------------------------------------
+
     def _get_powered_width(self):
         return self._powered_width_value
 
@@ -2984,9 +3103,7 @@ class BootSplash(QWidget):
 
     powered_width = pyqtProperty(int, fget=_get_powered_width, fset=_set_powered_width)
 
-    # ------------------------------------------------------------------
-    # 工具：让两个 QLabel 的文字基线对齐
-    # ------------------------------------------------------------------
+   
     @staticmethod
     def _align_baseline(label_a, label_b, base_y):
         fm_a = label_a.fontMetrics()
@@ -2995,9 +3112,9 @@ class BootSplash(QWidget):
         b_top = baseline_a - fm_b.ascent() - (label_b.height() - fm_b.height()) // 2
         return b_top
 
-    # ------------------------------------------------------------------
-    # 第一步：隐藏版权页，P 从底部升起
-    # ------------------------------------------------------------------
+
+    # 隐藏版权页
+  
     def _start_animation(self):
         self.credit_page.hide()
         self.p_label.show()
@@ -3014,9 +3131,9 @@ class BootSplash(QWidget):
         anim.start()
         self._animations.append(anim)
 
-    # ------------------------------------------------------------------
-    # 第二步：P 缩小，同时 ick 出现
-    # ------------------------------------------------------------------
+   
+    # P 缩小同时 ick 出现
+
     def _step_shrink(self):
         tmp_ratio = self.FINAL_SIZE / self.BIG_SIZE
         p_w_small = int(self.p_label.width() * tmp_ratio)
@@ -3077,9 +3194,9 @@ class BootSplash(QWidget):
 
         self._animations.extend([anim_shrink, anim_move, anim_fade])
 
-    # ------------------------------------------------------------------
-    # 第三步：Pick 左移，OS 从右侧滑入
-    # ------------------------------------------------------------------
+ 
+    # ：Pick 左移，OS 从右侧滑入
+   
     def _step_add_os(self):
         if self._ick_effect is not None:
             self.ick_label.setGraphicsEffect(None)
@@ -3132,10 +3249,7 @@ class BootSplash(QWidget):
         anim_os_slide.start()
 
         self._animations.extend([anim_p_slide, anim_ick_slide, anim_os_slide])
-
-    # ------------------------------------------------------------------
-    # 第四步：OPenPick 从下方滑入
-    # ------------------------------------------------------------------
+    # OPenPick 从下方滑入
     def _step_show_openpick(self):
         self.openpick_label.show()
 
@@ -3148,18 +3262,18 @@ class BootSplash(QWidget):
         anim.start()
         self._animations.append(anim)
 
-    # ------------------------------------------------------------------
+
     # 第五步：Powered by 从中间向两边展开
-    # ------------------------------------------------------------------
+   
     def _step_expand_powered(self):
-        # 重置到初始状态（宽度 0）
+        # 重置到初始状态
         self._powered_width_value = 0
         self.powered_container.setFixedWidth(0)
         self.powered_container.move(self.width() // 2, self._powered_target_y)
         self.powered_label.move(-self._powered_full_width // 2, 0)
         self.powered_container.show()
 
-        # 动画 powered_width 属性：0 → 完整宽度
+      
         anim = QPropertyAnimation(self, b"powered_width", self)
         anim.setDuration(500)
         anim.setStartValue(0)
@@ -3171,7 +3285,7 @@ class BootSplash(QWidget):
         # 停留后结束
         QTimer.singleShot(1000, self.skip)
 
-    # ------------------------------------------------------------------
+    
     def center(self):
         screen = QApplication.primaryScreen().availableGeometry()
         self.move(screen.center() - self.rect().center())
@@ -3181,7 +3295,7 @@ class BootSplash(QWidget):
         painter.fillRect(self.rect(), self.bg_color)
 
     def skip(self):
-        """开机动画结束：立即关闭，并启动主窗口（只触发一次）"""
+        """开机动画收工，关窗、点火、拉起主窗口"""
         if getattr(self, "_skip_done", False):
             return
         self._skip_done = True
@@ -3205,7 +3319,7 @@ class BootSplash(QWidget):
         if self.callback:
             QTimer.singleShot(0, self.callback)
 
-# ======================== 成绩总览界面（支持多考试切换、持久化、单科王、总览对比，统计两行） ========================
+# 成绩总览界面
 class ScoreInterface(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
@@ -3256,11 +3370,14 @@ class ScoreInterface(QWidget):
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setAlternatingRowColors(True)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.table.horizontalHeader().setStretchLastSection(False)
+        self.table.setHorizontalScrollMode(QTableWidget.ScrollMode.ScrollPerPixel)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.table.verticalHeader().setVisible(False)
         layout.addWidget(self.table)
 
-        # 统计信息标签（支持多行，自动换行）
+        # 统计信息标签
         self.stats_label = QLabel("暂无数据")
         self.stats_label.setStyleSheet("color: #A0A0B0; font-size: 15px;")
         self.stats_label.setWordWrap(True)
@@ -3360,7 +3477,12 @@ class ScoreInterface(QWidget):
             show_toast(self, f"文件缺少必要列：{', '.join(missing)}", "error")
             return
 
-        priority = ["学号", "姓名", "语文", "数学", "英语", "物理", "化学", "生物", "总分", "原分校名", "化学赋分", "生物赋分", "赋分总分", "赋分校名", "赋分班名"]
+        priority = ["学号", "姓名"]
+        for subj in get_custom_subjects():
+            priority.append(subj["name"])
+            if subj.get("use_assign"):
+                priority.append(f"{subj['name']}赋分")
+        priority.extend(["总分", "原分校名", "赋分总分", "赋分校名", "赋分班名"])
         all_cols = df.columns.tolist()
         available_cols = [col for col in priority if col in all_cols]
         other_cols = [col for col in all_cols if col not in available_cols and col != "班次"]
@@ -3380,12 +3502,12 @@ class ScoreInterface(QWidget):
         try:
             df_clean.to_csv(CURRENT_SCORES_FILE, index=False, encoding="utf-8-sig")
             self.current_data = df_clean
-            # ----- 新增：增加导入次数成就计数 -----
+            # 增加导入次数成就计数
             cfg = load_config()
             cfg["import_count"] = cfg.get("import_count", 0) + 1
             save_config(cfg)
             check_and_unlock_achievements()  # 立即检查成就
-            # ----- 新增结束 -----
+        
             show_toast(self, f"成功导入并保存 {len(df_clean)} 条记录作为本次考试", "success")
         except Exception as e:
             show_toast(self, f"保存本次考试失败：{e}", "error")
@@ -3399,7 +3521,7 @@ class ScoreInterface(QWidget):
             return
 
         columns = df.columns.tolist()
-        self.table.setUpdatesEnabled(False)          # ← 新增
+        self.table.setUpdatesEnabled(False)         
         try:
             self.table.setColumnCount(len(columns))
             self.table.setHorizontalHeaderLabels(columns)
@@ -3420,7 +3542,15 @@ class ScoreInterface(QWidget):
             for i in range(len(df)):
                 self.table.setRowHeight(i, 30)
         finally:
-            self.table.setUpdatesEnabled(True)       # ← 新增
+            self.table.setUpdatesEnabled(True)      
+
+        self.table.resizeColumnsToContents()
+        for i in range(self.table.columnCount()):
+            w = self.table.columnWidth(i)
+            if w < 80:
+                self.table.setColumnWidth(i, 80)
+            elif w > 200:
+                self.table.setColumnWidth(i, 200)
 
         # 总分统计
         score_col = None
@@ -3450,39 +3580,38 @@ class ScoreInterface(QWidget):
         else:
             self.stats_label.setText(f"共 {len(df)} 名学生，无有效成绩列")
 
-        # ---- 单科王（并列显示） ----
-        subject_map = {
-            "语文": "语文",
-            "数学": "数学",
-            "英语": "英语",
-            "物理": "物理",
-            "化学": "化学赋分",
-            "生物": "生物赋分"
-        }
+        # 单科王
         champion_texts = []
-        for display_name, col_name in subject_map.items():
-            if col_name in df.columns:
-                scores = pd.to_numeric(df[col_name], errors='coerce')
-                valid_scores = scores.dropna()
-                if not valid_scores.empty:
-                    max_score = valid_scores.max()
-                    max_rows = df[df[col_name] == max_score]
-                    students = []
-                    for _, row in max_rows.iterrows():
-                        stu_id = row.get('学号', '')
-                        stu_name = row.get('姓名', '')
-                        if stu_name and stu_id:
-                            students.append(f"{stu_name}({stu_id})")
-                    if students:
-                        champion_texts.append(f"{display_name}:{', '.join(students)}{max_score}分")
+        for subj in get_custom_subjects():
+            display_name = subj["name"]
+            col = resolve_subject_column(subj, df.columns)
+            if col is None:
+                continue
+            scores = pd.to_numeric(df[col], errors='coerce')
+            valid_scores = scores.dropna()
+            if valid_scores.empty:
+                continue
+            max_score = valid_scores.max()
+            max_rows = df[df[col] == max_score]
+            students = []
+            for _, row in max_rows.iterrows():
+                stu_id = row.get('学号', '')
+                stu_name = row.get('姓名', '')
+                if stu_name and stu_id:
+                    students.append(f"{stu_name}({stu_id})")
+            if students:
+                champion_texts.append(f"{display_name}:{', '.join(students)}{max_score}分")
         if champion_texts:
-            self.subject_champions_label.setText(" | ".join(champion_texts))
+            lines = []
+            for i in range(0, len(champion_texts), 6):
+                lines.append(" | ".join(champion_texts[i:i + 6]))
+            self.subject_champions_label.setText("\n".join(lines))
         else:
             self.subject_champions_label.setText("")
 
-    # ========== 总览对比视图（进步/退步分两行） ==========
+    # 总览对比视图
     def display_overview(self):
-        """显示本次与上次考试的对比数据，支持并列显示，可选排名依据"""
+        """显示本次与上次考试的对比数据"""
         if self.current_data is None or self.previous_data is None:
             self.clear_table("缺少本次或上次考试数据，无法对比")
             return
@@ -3504,8 +3633,8 @@ class ScoreInterface(QWidget):
             if col not in merged.columns:
                 merged[col] = ""
 
-        # ---- 直接计算数值差值（不使用字符串解析） ----
-        # 总分差值（浮点数）
+        # 直接计算数值差值
+  
         merged["_diff_total"] = (
             pd.to_numeric(merged["赋分总分_本次"], errors='coerce') -
             pd.to_numeric(merged["赋分总分_上次"], errors='coerce')
@@ -3529,13 +3658,12 @@ class ScoreInterface(QWidget):
         else:  # 赋分班名
             diff_col = "_diff_class"
 
-        # ---- 学号数字排序 ----
+        #学号数字排序
         merged = merged.dropna(subset=["学号"])
         merged["学号_int"] = merged["学号"].astype(int)
         merged = merged.sort_values("学号_int").reset_index(drop=True)
 
-        # ---- 填充表格（显示文本差值） ----
-        # 为了展示，我们仍用字符串格式化显示差值（保留一位小数）
+        # 填充表格
         def format_diff(val):
             if pd.isna(val):
                 return ""
@@ -3563,7 +3691,7 @@ class ScoreInterface(QWidget):
         df_display = merged[display_cols].copy()
         df_display.columns = header_names
 
-        self.table.setUpdatesEnabled(False)          # ← 新增
+        self.table.setUpdatesEnabled(False)         
         try:
             self.table.setColumnCount(len(header_names))
             self.table.setHorizontalHeaderLabels(header_names)
@@ -3582,9 +3710,17 @@ class ScoreInterface(QWidget):
             for i in range(len(df_display)):
                 self.table.setRowHeight(i, 30)
         finally:
-            self.table.setUpdatesEnabled(True)       # ← 新增
+            self.table.setUpdatesEnabled(True)      
 
-        # ---- 进步/退步排行榜（含并列处理，排除差值为0） ----
+        self.table.resizeColumnsToContents()
+        for i in range(self.table.columnCount()):
+            w = self.table.columnWidth(i)
+            if w < 80:
+                self.table.setColumnWidth(i, 80)
+            elif w > 200:
+                self.table.setColumnWidth(i, 200)
+
+        # 进步/退步排行榜
         top_n = cfg.get("overview_top_n", 5)
         valid = merged[merged[diff_col].notna()].copy()
         if valid.empty:
@@ -3656,7 +3792,7 @@ class ScoreInterface(QWidget):
             if not os.path.exists(CURRENT_SCORES_FILE):
                 show_toast(self, "本次考试数据已为空", "info")
                 return
-            # ---- 自定义确认对话框 ----
+            # 自定义确认对话框
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle("确认清空")
             msg_box.setText("确定要清空本次考试的所有数据吗？\n此操作不可恢复！")
@@ -3701,7 +3837,7 @@ class ScoreInterface(QWidget):
             if not os.path.exists(PREVIOUS_SCORES_FILE):
                 show_toast(self, "上次考试数据已为空", "info")
                 return
-            # ---- 同样自定义 ----
+         
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle("确认清空")
             msg_box.setText("确定要清空上次考试的所有数据吗？\n此操作不可恢复！")
@@ -3757,7 +3893,7 @@ class ScoreInterface(QWidget):
                                 self.app.stu_df, self.app.id_to_name)
         dialog.exec()
 
-# ======================== 考试加分弹窗（优化样式 + 提交确认） ========================
+# 考试加分弹窗
 class ExamBonusDialog(QDialog):
     def __init__(self, parent, current_data, previous_data, stu_df, id_to_name):
         super().__init__(parent)
@@ -3848,15 +3984,15 @@ class ExamBonusDialog(QDialog):
         """)
 
         self.rules = load_config().get("exam_bonus_rules", [])
-        # 确定可用科目列（与成绩界面保持一致）
-        self.subject_columns = [col for col in ["语文", "数学", "英语", "物理", "化学赋分", "生物赋分"] 
-                                if col in self.current_data.columns]
+        # 按用户配置生成科目列
+        self.subject_columns = []
+        for subj in get_custom_subjects():
+            col = resolve_subject_column(subj, self.current_data.columns)
+            if col is not None:
+                self.subject_columns.append(col)
         if not self.subject_columns:
-            # 若上述列都不存在，则尝试常见列名
-            self.subject_columns = [col for col in ["语文", "数学", "英语", "物理", "化学", "生物"] 
-                                    if col in self.current_data.columns]
-            if not self.subject_columns:
-                self.subject_columns = ["语文", "数学", "英语", "物理", "化学", "生物"]  # 占位
+            
+            self.subject_columns = [s["name"] for s in get_custom_subjects()]
         self.selected_rule_index = -1
 
         self.build_ui()
@@ -3868,7 +4004,7 @@ class ExamBonusDialog(QDialog):
         layout.setContentsMargins(25, 25, 25, 25)
         layout.setSpacing(15)
 
-        info = QLabel("定义加分规则：根据本次考试的成绩排名、校排名、班排名、进步/退步名次或单科王对学生加分。")
+        info = QLabel("定义加分规则：根据本次考试的成绩排名、校排名、班排名、进步/退步名次或单科王对学生加分")
         info.setWordWrap(True)
         info.setStyleSheet(f"color: {_c['fg_dim']}; font-size: 14px;")
         layout.addWidget(info)
@@ -4042,16 +4178,11 @@ class ExamBonusDialog(QDialog):
         type_combo.setCurrentText("赋分校名")
         layout.addRow("类型：", type_combo)
 
-        # 科目（仅当类型为单科王时显示）
+        # 科目
         subject_container = QWidget()
         subject_layout = QHBoxLayout(subject_container)
         subject_layout.setContentsMargins(0, 0, 0, 0)
         subject_combo = QComboBox()
-        # 从本次数据中获取科目列（语文、数学、英语、物理、化学、生物）
-        subject_cols = ["语文", "数学", "英语", "物理", "化学", "生物"]
-        available_subjects = [col for col in subject_cols if col in self.current_data.columns]
-        if not available_subjects:
-            available_subjects = ["语文", "数学", "英语", "物理", "化学", "生物"]  # 默认
         subject_options = ["所有科目"] + self.subject_columns
         subject_combo.addItems(subject_options)
         subject_layout.addWidget(subject_combo)
@@ -4112,7 +4243,7 @@ class ExamBonusDialog(QDialog):
                 subject_container.setVisible(False)
                 range_start.setEnabled(True)
                 range_end.setEnabled(True)
-                # 恢复默认值（如果之前是单科王，可能值被改了，但这里不自动恢复）
+                # 恢复默认值
         type_combo.currentTextChanged.connect(on_type_changed)
 
         btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -4151,7 +4282,7 @@ class ExamBonusDialog(QDialog):
         save_config(cfg)
 
     def submit_bonus(self):
-        # （业务计算逻辑保持不变，请直接保留你原来文件里的这一整段逻辑）
+        
         if self.current_data is None or self.current_data.empty:
             QMessageBox.warning(self, "错误", "请先导入本次考试成绩")
             return
@@ -4186,7 +4317,7 @@ class ExamBonusDialog(QDialog):
             if QMessageBox.question(self, "提示", "缺少上次考试数据，进步/退步规则将无效。是否继续？",
                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.No:
                 return
-        # 读取配置，获取排名依据（与总览一致）
+        # 读取配置，获取排名依据
         cfg = load_config()
         rank_by = cfg.get("overview_rank_by", "赋分班名")
         if rank_by == "赋分总分":
@@ -4209,11 +4340,10 @@ class ExamBonusDialog(QDialog):
                 pd.to_numeric(merged["赋分班名_本次"], errors='coerce') -
                 pd.to_numeric(merged["赋分班名_上次"], errors='coerce')
             )
-        # 预计算单科王（最高分及其学生）
-        subject_columns = ["语文", "数学", "英语", "物理", "化学赋分", "生物赋分"]
+            # 预计算单科王
         subject_top_students = {}
         for subj in self.subject_columns:
-            # 尝试查找原始列名或带 _本次 的列名
+            # 尝试查找原始列名或带本次的列名
             col_candidates = [subj, subj + "_本次"]
             col = None
             for c in col_candidates:
@@ -4227,7 +4357,7 @@ class ExamBonusDialog(QDialog):
                 max_score = scores.max()
                 top_students = merged[scores == max_score]["学号"].tolist()
                 subject_top_students[subj] = top_students
-        # ================== 新增：预计算进步/退步 Top N 并列名单 ==================
+        #预计算进步/退步并列名单
         cfg = load_config()
         rank_by = cfg.get("overview_rank_by", "赋分班名")  # 默认使用赋分班名
         if rank_by == "赋分总分":
@@ -4237,8 +4367,8 @@ class ExamBonusDialog(QDialog):
         else:
             diff_col = "_diff_class"
         has_progress_rule = any(r["type"] in ["进步排名", "退步排名"] for r in self.rules)
-        prog_top_students = set()   # 存放进步前 N 名的学号
-        reg_top_students = set()    # 存放退步前 N 名的学号
+        prog_top_students = set()   # 存放进步前名的学号
+        reg_top_students = set()    # 存放退步前名的学号
         if has_progress_rule and previous is not None:
             for rule in self.rules:
                 rule_type = rule["type"]
@@ -4482,7 +4612,7 @@ class HeartPopup(QDialog):
         self.setWindowTitle("💖 爱心便签")
         self.setFixedSize(200, 120)
 
-        # 随机背景色（与原版完全一致）
+        # 随机背景色
         colors = ['#FFB6C1', '#ADD8E6', '#90EE90', '#FFFACD', '#DDA0DD',
                   '#F0E68C', '#FFDAB9', '#B0E0E6', '#E6E6FA', '#F5DEB3']
         bg = random.choice(colors)
@@ -4507,7 +4637,7 @@ class HeartPopup(QDialog):
         label.setWordWrap(True)
         layout.addWidget(label)
 
-        # 定位（与原版一致）
+        # 定位
         screen = QApplication.primaryScreen().availableGeometry()
         if x is not None and y is not None:
             x = max(0, min(x, screen.width() - self.width()))
@@ -4523,9 +4653,9 @@ class HeartPopup(QDialog):
         self.raise_()
         self.repaint()
 
-# ======================== 导航图标临时浮层（用于弹动/旋转） ========================
+
 class _NavIconOverlay(QLabel):
-    """覆盖在导航图标上的临时浮层，用来显示放大/旋转后的图标。"""
+    """覆盖在导航图标上的临时浮层，用来显示放大/旋转后的图标"""
 
     def __init__(self, pixmap, global_center, base_size):
         super().__init__(None)
@@ -4588,17 +4718,17 @@ class _NavIconOverlay(QLabel):
         except Exception:
             pass
 
-# ======================== 主窗口（应用全局样式 + 顶部时钟） ========================
+# 主窗口应用全局样式 顶部时钟 
 class MainWindow(FluentWindow):
-    # 静默更新：子线程 → 主线程
+    # 静默更新
     _silent_update_signal = pyqtSignal(str, str, str)
 
     def __init__(self):
         super().__init__()
-        # ----- 根据用户主题配置设置 qfluentwidgets 主题 -----
+        # 根据用户主题配置设置主题 
         setTheme(get_qfluent_theme(), save=True)
         setThemeColor("#64B5F6")
-        # ---------------------------------
+    
         self.setWindowTitle("PickOS 班级管理系统")
         self.resize(1280, 720)
 
@@ -4607,21 +4737,18 @@ class MainWindow(FluentWindow):
         # 数据成员
         self.stu_df = None
         self.id_to_name = {}
-        if os.path.exists(CLASS_LIST_FILE):
-            self.current_file = CLASS_LIST_FILE
-        else:
-            self.current_file = read_config()
+        self.current_file = CLASS_LIST_FILE
         self.template_path = read_template_config()
         self.start_time = time.time()
         self.backup_mgr = BackupManager(backup_dir=BACKUP_DIR)
         self.input_frame = None
-        
 
         init_score_file()
-        self.load_student_data(self.current_file)
+        if os.path.exists(CLASS_LIST_FILE):
+            self.load_student_data(CLASS_LIST_FILE)
 
         # 创建页面
-        # 先创建其他所有页面（因为首页需要引用它们）
+  
         self.inputInterface = InputInterface(self)
         self.rankingInterface = RankingInterface(self)
         self.exportInterface = ExportInterface(self)
@@ -4630,7 +4757,7 @@ class MainWindow(FluentWindow):
         self.aboutInterface = AboutInterface(self)
         self.listManagerInterface = ListManagerInterface(self)
         self.scoreInterface = ScoreInterface(self)
-        # 最后创建首页（此时 app.inputInterface 等已存在）
+        # 最后创建首页
         self.homeInterface = HomeInterface(self)
 
         self.addSubInterface(self.homeInterface, FluentIcon.HOME, "首页", NavigationItemPosition.TOP)
@@ -4893,7 +5020,7 @@ class MainWindow(FluentWindow):
         self.move((screen_geo.width() - self.width()) // 2,
                 (screen_geo.height() - self.height()) // 2)
 
-        # ---------- 添加顶部实时时钟 ----------
+        # 添加顶部实时时钟
         self._init_time_label()
         self._init_level_label()
 
@@ -4903,14 +5030,11 @@ class MainWindow(FluentWindow):
 
         self.update_title_with_level()
         QApplication.instance().main_window = self
-        # 设备运行经验 / 首次成就检查 / 在线检查，统一移到
-        # start_post_boot_tasks() 里，由主入口在"主窗口真正显示后"调用，
-        # 避免新手引导 / 密码验证阶段弹成就、升级通知。
-        # 在 __init__ 末尾添加
+     
         self.create_tray_icon()
         self.floating_window = None   # 悬浮窗实例
 
-        # ---------- 表格选中高亮：点击表格外自动清除 ----------
+        # 点击表格外自动清除
         self.table_selection_cleaner = TableSelectionCleaner(self)
         app_instance = QApplication.instance()
         if app_instance is not None:
@@ -4919,15 +5043,15 @@ class MainWindow(FluentWindow):
         self.table_selection_cleaner.register(getattr(self.scoreInterface, "table", None))
         self.table_selection_cleaner.register(getattr(self.listManagerInterface, "table", None))
 
-        # ★ 主窗口构造完毕，正式启用粒子效果
+        # 主窗口构造完毕就粒子效果
         ParticleEventFilter._app_ready = True
 
         # 连接静默更新信号到主线程槽
         self._silent_update_signal.connect(self._on_silent_update_found)
 
-        # ======================== 导航栏切换动画 ========================
+        #导航栏切换动画
     def switchTo(self, interface, *args, **kwargs):
-        """重写 switchTo：切换后播放导航图标弹动，设置额外齿轮旋转。"""
+        """重写 switchTo：切换后播放导航图标弹动，设置额外齿轮旋转"""
         super().switchTo(interface, *args, **kwargs)
         try:
             route_key = interface.objectName()
@@ -4960,20 +5084,20 @@ class MainWindow(FluentWindow):
         self._play_nav_icon_animation(icon_label, spin=is_settings)
 
     def _find_nav_button(self, routeKey):
-        """在 qfluentwidgets 的导航面板中按 routeKey 查找按钮，兼容多种版本。"""
+        """在 qfluentwidgets 的导航面板中按 routeKey 查找按钮，兼容多种版本"""
         try:
             panel = getattr(self.navigationInterface, "panel", None)
             if panel is None:
                 return None
 
-            # 1) 标准方式：NavigationPanel.items 字典
+      
             items = getattr(panel, "items", None)
             if isinstance(items, dict):
                 btn = items.get(routeKey)
                 if btn is not None:
                     return btn
 
-            # 2) 兜底：QScrollArea.widget() 的 widget 里 findChildren
+   
             inner = None
             try:
                 inner = panel.widget()
@@ -4984,12 +5108,12 @@ class MainWindow(FluentWindow):
                 for w in inner.findChildren(NavigationWidget):
                     if getattr(w, "objectName", lambda: "")() == routeKey:
                         return w
-                # 有些版本按钮的 routeKey 存在 property 里
+        
                 for w in inner.findChildren(NavigationWidget):
                     if getattr(w, "routeKey", None) == routeKey:
                         return w
 
-            # 3) 再兜底：panel 直接 findChildren
+      
             try:
                 from qfluentwidgets import NavigationWidget
                 for w in panel.findChildren(NavigationWidget):
@@ -5002,7 +5126,7 @@ class MainWindow(FluentWindow):
         return None
 
     def _get_icon_pixmap(self, icon_label):
-        """尽量从 IconWidget 中拿到高质量 pixmap。"""
+        """尽量从 IconWidget 中拿到高质量 pixmap"""
         try:
             icon = getattr(icon_label, "icon", None)
             if icon is None:
@@ -5024,7 +5148,7 @@ class MainWindow(FluentWindow):
         return None
 
     def _play_nav_icon_animation(self, icon_label, spin=False):
-        """在图标上覆盖一层临时浮层，播放弹动（和齿轮旋转）。"""
+        """在图标上覆盖一层临时浮层，播放"""
         try:
             pixmap = self._get_icon_pixmap(icon_label)
             if pixmap is None or pixmap.isNull():
@@ -5035,14 +5159,14 @@ class MainWindow(FluentWindow):
                 global_tl.x() + icon_label.width() // 2,
                 global_tl.y() + icon_label.height() // 2,
             )
-            # 图标控件很小，浮层以它为基础尺寸做缩放
+         
             base_size = max(icon_label.width(), icon_label.height(), 20)
 
             overlay = _NavIconOverlay(pixmap, center, base_size)
             overlay.show()
             overlay.raise_()
 
-            # ---- 弹动：1.0 -> 1.40 -> 0.86 -> 1.0 ----
+         
             scale_anim = QVariantAnimation(overlay)
             scale_anim.setDuration(420)
             scale_anim.setStartValue(1.0)
@@ -5054,7 +5178,7 @@ class MainWindow(FluentWindow):
                 lambda v: overlay.set_scale(float(v))
             )
 
-            # ---- 齿轮旋转：0° -> 720° ----
+          
             angle_anim = None
             if spin:
                 angle_anim = QVariantAnimation(overlay)
@@ -5086,8 +5210,8 @@ class MainWindow(FluentWindow):
             print(f"图标动画异常: {e}")
 
     def start_post_boot_tasks(self):
-        """主窗口真正显示后调用：设备运行经验、首次成就检查、在线检查。
-        只执行一次，供新手引导完成 / 常规启动两条路径共用。
+        """主窗口真正显示后调用：设备运行经验、首次成就检查、在线检查
+        只执行一次，供新手引导完成 / 常规启动两条路径共用
         """
         if getattr(self, "_post_boot_started", False):
             return
@@ -5096,56 +5220,55 @@ class MainWindow(FluentWindow):
         # 从现在起允许成就/升级通知弹出
         POST_BOOT_READY["value"] = True
 
-        # 1) 设备运行经验（可能升级，此时主窗口已可见，InfoBar 能正常挂上去）
+        # 设备运行经验
         try:
             self._check_device_runtime()
         except Exception as e:
-            print(f"⚠️ 设备运行经验异常：{e}")
+            print(f"设备运行经验异常：{e}")
 
-        # 2) 首次成就检查（含 first_launch、walk_* 等）
+        # 首次成就检查（含 first_launch、walk_* 等）
         QTimer.singleShot(600, check_and_unlock_achievements)
 
-        # 3) 在线经验检查一次
+        #  在线经验检查一次
         QTimer.singleShot(1000, self._check_online_experience)
 
-        # 4) 启动后 5 秒静默检查更新
+        # 启动后 5 秒静默检查更新
         QTimer.singleShot(5000, self._silent_check_update)
 
     def _silent_check_update(self):
         """启动 5 秒后静默检查更新（后台线程，不阻塞 UI）"""
         is_frozen = getattr(sys, "frozen", False)
-        # 源码运行时也允许检查（方便调试）；如果不想在开发环境被弹窗打扰，
-        # 可以在 config.json 里加 "dev_skip_silent_update": true 来控制。
+        
         if not is_frozen:
             try:
                 if load_config().get("dev_skip_silent_update", False):
-                    print("ℹ️ [静默更新] 源码模式，dev_skip_silent_update=True，跳过")
+                    print("[静默更新] 源码模式，跳过")
                     return
             except Exception:
                 pass
 
         def check_thread():
             try:
-                print("🔍 [静默更新] 开始检查...")
+                print("[静默更新] 开始检查")
                 has_update, latest_ver, changelog, url = UpdateManager.check_update()
-                print(f"🔍 [静默更新] 检测结果 has_update={has_update}, latest={latest_ver}, url={url}")
+                print(f"[静默更新] 检测结果 has_update={has_update}, latest={latest_ver}, url={url}")
                 if has_update and url:
-                    # ★ 用信号回主线程，PyQt 会自动用 QueuedConnection 排队
+                    # 回主线程
                     self._silent_update_signal.emit(
                         latest_ver or "", changelog or "", url or ""
                     )
                 elif not has_update:
-                    print("🔍 [静默更新] 已是最新版本")
+                    print("[静默更新] 已是最新版本")
             except Exception as e:
-                print(f"⚠️ [静默更新] 检查失败：{e}")
+                print(f"[静默更新] 检查失败：{e}")
 
         threading.Thread(target=check_thread, daemon=True).start()
 
 
     @pyqtSlot(str, str, str)
     def _on_silent_update_found(self, latest_ver, changelog, url):
-        """主线程收到静默更新结果 → 弹窗询问"""
-        print(f"🔍 [静默更新] 主线程收到弹窗请求 v={latest_ver}")
+        """主线程收到静默更新结果弹窗询问"""
+        print(f"[静默更新] 主线程收到弹窗请求 v={latest_ver}")
         try:
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle("发现新版本")
@@ -5155,7 +5278,7 @@ class MainWindow(FluentWindow):
             )
             msg_box.setDefaultButton(QMessageBox.StandardButton.Yes)
             msg_box.setStyleSheet(DIALOG_STYLE)
-            # ★ 保证弹出窗口位于主窗口之上
+            # 保证弹出窗口位于主窗口之上
             msg_box.setWindowModality(Qt.WindowModality.ApplicationModal)
             msg_box.raise_()
             msg_box.activateWindow()
@@ -5166,7 +5289,7 @@ class MainWindow(FluentWindow):
                 self._update_window.raise_()
                 self._update_window.activateWindow()
         except Exception as e:
-            print(f"⚠️ [静默更新] 弹窗失败：{e}")
+            print(f"[静默更新] 弹窗失败：{e}")
             import traceback
             traceback.print_exc()
 
@@ -5200,7 +5323,7 @@ class MainWindow(FluentWindow):
                     )
 
     def _init_level_label(self):
-        """在标题标签后面插入等级标签（大字号）"""
+        """标题旁边塞个Lv.X，让人看一眼就：“呵，长大了”"""
         layout = self.titleBar.layout()
         if layout is None:
             return
@@ -5225,7 +5348,7 @@ class MainWindow(FluentWindow):
         self.level_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.level_label.setFixedHeight(30)
         self.level_label.adjustSize()
-        # 插入到标题标签后面（索引+1）
+        # 插入到标题标签后面
         layout.insertWidget(layout.indexOf(title_label) + 1, self.level_label)
         # 更新等级
         self.update_title_with_level()
@@ -5287,16 +5410,16 @@ class MainWindow(FluentWindow):
                 cfg["today_online_exp"] = today_online_exp + max_gain
                 save_config(cfg)
                 
-                # 添加经验（受每日上限限制）
+                # 添加经验
                 success, actual, is_level_up = add_experience(max_gain, "在线计时")
                 if success and actual > 0:
-                    # 更新窗口标题（等级可能变化）
+                    # 更新窗口标题
                     self.update_title_with_level()
 
 
     def _set_window_icon(self):
         """从 Base64 字符串加载图标并设为窗口图标（任务栏也会显示）"""
-        # 请将您的 Base64 图标字符串赋值给下面的变量
+      
         base64_str = "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"   # ← 在这里粘贴您的 Base64 字符串
         
         if not base64_str:
@@ -5311,9 +5434,9 @@ class MainWindow(FluentWindow):
             if not pixmap.isNull():
                 self.setWindowIcon(QIcon(pixmap))
             else:
-                print("⚠️ 图标加载失败：QPixmap 无法解析数据")
+                print("图标加载失败：QPixmap 无法解析数据")
         except Exception as e:
-            print(f"⚠️ 图标加载异常：{e}")
+            print(f"图标加载异常：{e}")
 
         
 
@@ -5423,7 +5546,7 @@ class MainWindow(FluentWindow):
         super().resizeEvent(event)
         self.update_time_label_position()
 
-    # ---------- 原有方法（保持不变） ----------
+
     def after_boot(self):
         self.show()
 
@@ -5433,7 +5556,6 @@ class MainWindow(FluentWindow):
             self.stu_df = df
             self.id_to_name = id_map
             self.current_file = file_path
-            save_config_path(file_path)
             self.backup_mgr.save_student_backup(df)
             show_toast(self, msg, "success")
             return True
@@ -5488,10 +5610,10 @@ class MainWindow(FluentWindow):
         )
         if not file_path:
             return
-        # 1) 先把用户选择的 Excel 转存为标准「班级名单.xlsx」（覆盖旧文件）
+       
         if not self._save_as_class_list(file_path):
             return
-        # 2) 再统一从标准文件加载
+        # 统一从标准文件加载
         if self.load_student_data(CLASS_LIST_FILE):
             self.switchTo(self.homeInterface)
 
@@ -5500,7 +5622,7 @@ class MainWindow(FluentWindow):
         （路径：user/data/班级名单.xlsx，存在则覆盖）
         返回 True 表示成功；False 表示失败（已弹出提示）"""
         try:
-            df = pd.read_excel(source_path)   # 不强制 engine，兼容 .xls / .xlsx
+            df = pd.read_excel(source_path)   
         except Exception as e:
             show_toast(self, f"读取名单失败：{e}", "error")
             return False
@@ -5509,7 +5631,7 @@ class MainWindow(FluentWindow):
             return False
         try:
             df_copy = df.copy()
-            df_copy["学号"] = df_copy["学号"].astype(str)          # 学号统一转文本，避免前导零/科学计数
+            df_copy["学号"] = df_copy["学号"].astype(str)          
             df_copy = df_copy.drop_duplicates(subset=["学号"]).reset_index(drop=True)
             os.makedirs(os.path.dirname(CLASS_LIST_FILE), exist_ok=True)
             df_copy.to_excel(CLASS_LIST_FILE, index=False, engine="openpyxl")
@@ -5519,8 +5641,7 @@ class MainWindow(FluentWindow):
         return True
 
     def reset_scores(self):
-        # 自定义 QMessageBox
-        # ✅ 第一个 QMessageBox —— 用 DIALOG_STYLE
+        
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("⚠️ 确认重置")
         msg_box.setText("确定要重置所有积分记录吗？\n重置前会自动备份当前数据。")
@@ -5528,12 +5649,12 @@ class MainWindow(FluentWindow):
         msg_box.setDefaultButton(QMessageBox.StandardButton.No)
         msg_box.setStyleSheet(DIALOG_STYLE)
         
-        # ★ 核心修复：获取返回值并判断
+        
         reply = msg_box.exec()
         if reply != QMessageBox.StandardButton.Yes:
             return  # 如果点了 No 或者直接关掉，直接结束函数，不再往下走
 
-        # ✅ QInputDialog —— 用 DIALOG_STYLE
+        #  用 DIALOG_STYLE
         input_dialog = QInputDialog(self)
         input_dialog.setWindowTitle("确认操作")
         input_dialog.setLabelText("请输入“确认重置”以继续：")
@@ -5555,7 +5676,7 @@ class MainWindow(FluentWindow):
             save_config(cfg)
             check_and_unlock_achievements()
 
-        # 备份 Excel 文件（可选）
+        # 备份 Excel 文件
         if self.template_path and os.path.exists(self.template_path):
             ok, msg = export_excel_with_template(self.stu_df, self.template_path, month=None, output_name=os.path.join(BACKUP_DIR, f"备份_积分记录_{ts}.xlsx"))
             if not ok:
@@ -5565,12 +5686,12 @@ class MainWindow(FluentWindow):
             if not ok:
                 show_toast(self, f"⚠️ Excel备份导出失败（不影响重置）：{msg}", "warning")
 
-        # ========== 关键：清空积分记录 ==========
+        # 清空积分记录
         try:
             cols = ["学号", "姓名", "日期", "变动类型", "类别", "分数", "赋分总分", "备注"]
             pd.DataFrame(columns=cols).to_csv(DATA_CSV, index=False, encoding="utf-8-sig")
             show_toast(self, f"✅ 积分已重置，备份文件：{backup_csv}", "success")
-            # 刷新排行榜页面（如果可见）
+            # 刷新排行榜页面
             self.refresh_ranking()
         except Exception as e:
             show_toast(self, f"❌ 清空记录失败：{e}", "error")
@@ -5750,25 +5871,68 @@ class MainWindow(FluentWindow):
             self.show_window()
 
     def show_window(self):
+       
+        if self.isMinimized():
+            self.setWindowState(self.windowState() & ~Qt.WindowState.WindowMinimized)
         self.showNormal()
         self.raise_()
         self.activateWindow()
-        self.hide_floating_window()    # 激活窗口获得焦点
+
+        
+        try:
+            wh = self.windowHandle()
+            if wh is not None:
+                wh.requestActivate()
+        except Exception:
+            pass
+
+        self.hide_floating_window()
+
+       
+        QTimer.singleShot(0, self._restore_content_focus)
+
+    def _restore_content_focus(self):
+        """恢复主窗口"""
+        try:
+            fw = QApplication.focusWidget()
+            
+            if fw is not None and hasattr(self, "titleBar"):
+                try:
+                    if self.titleBar.isAncestorOf(fw):
+                        fw.clearFocus()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+       
+        try:
+            page = None
+            try:
+                page = self.stackedWidget.currentWidget()
+            except Exception:
+                page = None
+            if page is not None and page.isVisible():
+                page.setFocus(Qt.FocusReason.OtherFocusReason)
+            else:
+                cw = self.centralWidget()
+                if cw is not None:
+                    cw.setFocus(Qt.FocusReason.OtherFocusReason)
+        except Exception as e:
+            print(f"恢复焦点失败：{e}")
 
     def changeEvent(self, event):
         if event.type() == event.Type.WindowStateChange:
             if self.isMinimized():
-                # ---- 最小化：先播放粒子效果 ----
-                # 防止重复触发（例如系统连续发多次 WindowStateChange）
                 if not getattr(self, '_particle_min_emitted', False):
                     self._particle_min_emitted = True
                     try:
                         # 用 normalGeometry 保证拿到的不是最小化后的异常尺寸
                         _spawn_close_particles(self)
                     except Exception as e:
-                        print(f"⚠️ 最小化粒子异常: {e}")
+                        print(f"最小化粒子异常: {e}")
 
-                # 最小化 → 显示悬浮窗，隐藏主窗口
+                # 最小化显示悬浮窗，隐藏主窗口
                 self.show_floating_window()
                 self.hide()
             else:
@@ -5828,11 +5992,11 @@ class MainWindow(FluentWindow):
             self.floating_window.hide()
 
 class TableSelectionCleaner(QObject):
-    """点击表格外区域时，自动清除表格的选中高亮。
+    """点击表格外区域时，自动清除表格的选中高亮
     只调用 clearSelection()，不会清除 item 的背景色 ——
-    因此搜索结果设置的黄色高亮背景会被保留。
-    ★ 新增：点击按钮（含按钮内部子控件）时不清空，避免删除了
-       「先选行再点表格外按钮」的交互。
+    因此搜索结果设置的黄色高亮背景会被保留
+    点击按钮（含按钮内部子控件）时不清空，避免删除了
+       「先选行再点表格外按钮」的交互
     """
 
     def __init__(self, parent=None):
@@ -5843,7 +6007,7 @@ class TableSelectionCleaner(QObject):
         if table is not None and table not in self._tables:
             self._tables.append(table)
 
-    # ---------- 工具：判断点击是否发生在按钮上 ----------
+    #判断点击是否发生在按钮上
     @staticmethod
     def _is_button_click(obj, gp):
         try:
@@ -5851,7 +6015,7 @@ class TableSelectionCleaner(QObject):
         except Exception:
             return False
 
-        # 1) 从事件接收者向上找
+        #从事件接收者向上找
         try:
             probe = obj
             depth = 0
@@ -5888,7 +6052,7 @@ class TableSelectionCleaner(QObject):
         except Exception:
             return False
 
-        # ★ 关键：点击按钮 → 保留表格的选中，不清空
+        # 不清空
         if self._is_button_click(obj, gp):
             return False
 
@@ -5941,6 +6105,7 @@ class FloatingWindow(QWidget):
                   screen.height() - self.height() - 50)
 
         self.drag_pos = None
+        self._ranking_dialog = None
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -5957,15 +6122,13 @@ class FloatingWindow(QWidget):
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            # ---- 先播放粒子效果，再隐藏悬浮窗、恢复主窗口 ----
             try:
                 _spawn_close_particles(self)
             except Exception as e:
-                print(f"⚠️ 悬浮窗粒子异常: {e}")
+                print(f"悬浮窗粒子异常: {e}")
 
-            # 立刻隐藏悬浮窗，让粒子层单独显示（避免图标残留在粒子中间）
             self.hide()
-            self.main_window.show_window()
+            QTimer.singleShot(0, self.main_window.show_window)
 
     def contextMenuEvent(self, event):
         menu = QMenu(self)
@@ -5973,7 +6136,7 @@ class FloatingWindow(QWidget):
         show_action = menu.addAction("显示主窗口")
         show_action.triggered.connect(self.main_window.show_window)
 
-        # 新增：查看积分排行榜
+        # 查看积分排行榜
         rank_action = menu.addAction("📊 查看积分排行榜")
         rank_action.triggered.connect(self.show_ranking_dialog)
 
@@ -5983,69 +6146,129 @@ class FloatingWindow(QWidget):
         menu.exec(event.globalPos())
 
     def show_ranking_dialog(self):
-        """弹出积分排行榜对话框（排名、学号、姓名三列，自适应）"""
-        stu_df = self.main_window.stu_df
-        if stu_df is None or stu_df.empty:
-            QMessageBox.information(self, "提示", "请先加载学生名单")
-            return
+        """弹出积分排行榜"""
+       
+        self.hide()
 
-        result, err = calc_total_score(stu_df, month=None)
-        if result is None or result.empty:
-            QMessageBox.information(self, "提示", "暂无积分数据" if not err else err)
-            return
+        
+        old = getattr(self, "_ranking_dialog", None)
+        if old is not None:
+            try:
+                if old.isVisible():
+                    old.raise_()
+                    old.activateWindow()
+                    return
+            except RuntimeError:
+                pass
+            self._ranking_dialog = None
 
-        # 提取排名、学号、姓名三列
-        df_display = result[["排名", "学号", "姓名"]].copy()
+        dialog = None
+        try:
+            stu_df = self.main_window.stu_df
+            if stu_df is None or stu_df.empty:
+                QMessageBox.information(None, "提示", "请先加载学生名单")
+                return
 
-        dialog = QDialog(self)
-        dialog.setWindowTitle("📊 积分排行榜")
-        dialog.setStyleSheet(DIALOG_STYLE)   # 使用全局暗色样式
-        dialog.resize(215, 420)
+            result, err = calc_total_score(stu_df, month=None)
+            if result is None or result.empty:
+                QMessageBox.information(None, "提示", "暂无积分数据" if not err else err)
+                return
 
-        table = QTableWidget()
-        install_scrolling_header(table)
-        table.setColumnCount(3)
-        table.setHorizontalHeaderLabels(["排名", "学号", "姓名"])
-        table.setRowCount(len(df_display))
-        for i, row in df_display.iterrows():
-            table.setItem(i, 0, QTableWidgetItem(str(row["排名"])))
-            table.setItem(i, 1, QTableWidgetItem(str(row["学号"])))
-            table.setItem(i, 2, QTableWidgetItem(str(row["姓名"])))
-            # 居中对齐
-            for j in range(3):
-                table.item(i, j).setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            df_display = result[["排名", "学号", "姓名"]].copy()
 
-        # 列宽自适应内容，但限制最小宽度
-        header = table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        header.setStretchLastSection(False)   # 不拉伸最后一列，允许各列按内容宽度
-        # 设置最小宽度避免过窄
-        table.setColumnWidth(0, 60)
-        table.setColumnWidth(1, 80)
-        table.setColumnWidth(2, 120)
+            dialog = QDialog(None)
+            dialog.setWindowTitle("📊 积分排行榜")
+           
+            dialog.setWindowFlags(
+                Qt.WindowType.Dialog
+                | Qt.WindowType.WindowStaysOnTopHint
+                | Qt.WindowType.WindowTitleHint
+                | Qt.WindowType.WindowCloseButtonHint
+            )
+            dialog.setStyleSheet(DIALOG_STYLE)
+            dialog.resize(215, 420)
 
-        table.verticalHeader().setVisible(False)
-        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        table.setAlternatingRowColors(True)
+            table = QTableWidget()
+            install_scrolling_header(table)
+            table.setColumnCount(3)
+            table.setHorizontalHeaderLabels(["排名", "学号", "姓名"])
+            table.setRowCount(len(df_display))
+            for i, row in df_display.iterrows():
+                table.setItem(i, 0, QTableWidgetItem(str(row["排名"])))
+                table.setItem(i, 1, QTableWidgetItem(str(row["学号"])))
+                table.setItem(i, 2, QTableWidgetItem(str(row["姓名"])))
+                for j in range(3):
+                    table.item(i, j).setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # 布局
-        layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(15, 15, 15, 15)
-        layout.addWidget(table)
+            header = table.horizontalHeader()
+            header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+            header.setStretchLastSection(False)
+            table.setColumnWidth(0, 60)
+            table.setColumnWidth(1, 80)
+            table.setColumnWidth(2, 120)
 
-        close_btn = QPushButton("关闭")
-        close_btn.setFixedWidth(100)
-        close_btn.clicked.connect(dialog.accept)
-        layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+            table.verticalHeader().setVisible(False)
+            table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+            table.setAlternatingRowColors(True)
 
-        dialog.exec()
+            layout = QVBoxLayout(dialog)
+            layout.setContentsMargins(15, 15, 15, 15)
+            layout.addWidget(table)
+
+            close_btn = QPushButton("关闭")
+            close_btn.setFixedWidth(100)
+            close_btn.clicked.connect(dialog.close)
+            layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+            # 居中显示
+            screen = QApplication.primaryScreen().availableGeometry()
+            dialog.move(screen.center() - dialog.rect().center())
+
+           
+            dialog.finished.connect(lambda _=0: self._restore_floating_window_after_dialog())
+            dialog.destroyed.connect(lambda _=0: self._restore_floating_window_after_dialog())
+
+          
+            self._ranking_dialog = dialog
+
+          
+            dialog.show()
+            dialog.raise_()
+            dialog.activateWindow()
+            return   
+
+        except Exception as e:
+            print(f"[排行榜] 打开失败：{e}")
+
+        
+        if dialog is not None:
+            try:
+                dialog.deleteLater()
+            except Exception:
+                pass
+        QTimer.singleShot(0, self._restore_floating_window_after_dialog)
+
+    def _restore_floating_window_after_dialog(self):
+        """排行榜关闭后恢复悬浮窗"""
+        try:
+            mw = self.main_window
+            if mw is None:
+                return
+            
+            if mw.isVisible() and not mw.isMinimized():
+                return
+            self.show()
+            self.raise_()
+            self.activateWindow()
+        except Exception as e:
+            print(f"恢复悬浮窗失败：{e}")
 
     def closeEvent(self, event):
-        # 关闭悬浮窗只是隐藏，不销毁
+       
         self.hide()
         event.ignore()
 
-# ======================== 首页（便签替换天气卡片，双击操作，无分隔线，右侧对齐优化，自定义弹窗） ========================
+# 首页
 try:
     import psutil
     HAS_PSUTIL = True
@@ -6131,7 +6354,7 @@ class HomeInterface(QWidget):
         self.refresh_timer.start(1000)
         QTimer.singleShot(100, self.refresh_dashboard_data)
 
-    # ==================== 便签数据持久化 ====================
+    # 便签数据持久化
     def _notes_file_path(self):
         return os.path.join(DATA_DIR, "notes.json")
 
@@ -6163,7 +6386,7 @@ class HomeInterface(QWidget):
         except Exception as e:
             print("保存便签失败:", e)
 
-    # ==================== 便签卡片 ====================
+    # 便签卡片 
     def build_notes_card(self, card):
         _c = get_theme_colors()
         layout = card.main_layout
@@ -6258,7 +6481,7 @@ class HomeInterface(QWidget):
             self.notes_list.setCurrentRow(0)
             self._on_note_selected(self.notes_list.item(0))
 
-    # ==================== 便签内容编辑 / 新建 ====================
+    #便签内容编辑 / 新建
     def _on_content_changed(self):
         """便签内容编辑后自动保存到 notes.json"""
         if self.current_index < 0 or self.current_index >= len(self.notes):
@@ -6357,7 +6580,7 @@ class HomeInterface(QWidget):
         layout.setContentsMargins(25, 25, 25, 25)
         layout.setSpacing(18)
         title_label = QLabel(f"便签：{title}")
-        # ★ 修复：原字符串少了 f 前缀
+        
         title_label.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {_c['fg']};")
         layout.addWidget(title_label)
         info_label = QLabel("请选择要执行的操作：")
@@ -6522,7 +6745,7 @@ class HomeInterface(QWidget):
                 self.save_status.setText("")
             show_toast(self, f"已删除便签：{title}", "info")
 
-    # ==================== 构建整体界面 ====================
+    # 构建整体界面
     def build_dashboard_ui(self):
         _c = get_theme_colors()
         _is_dark = _is_dark_color(_c["bg"])
@@ -6530,7 +6753,7 @@ class HomeInterface(QWidget):
                     f"stop:0 {_c['bg']}, stop:1 {_c['bg_alt']})")
         self.setStyleSheet(f"#homeInterface {{ background: {_bg_grad}; }}")
         
-        # ★ 修改点 1：外层使用 QVBoxLayout，里面装 QScrollArea
+
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
@@ -6553,7 +6776,7 @@ class HomeInterface(QWidget):
         content_widget = QWidget()
         content_widget.setStyleSheet("background: transparent;")
 
-        # 原来的 main_layout 现在放在 content_widget 里
+       
         main_layout = QVBoxLayout(content_widget)
         main_layout.setContentsMargins(24, 16, 24, 16)
         main_layout.setSpacing(18)
@@ -6738,7 +6961,7 @@ class HomeInterface(QWidget):
         card.title_label = title_label
         return card
 
-    # ==================== 日历卡片（含年月切换、点击高亮、年月与倒计时齐平） ====================
+    #日历卡片
     def _clear_layout(self, layout):
         while layout.count():
             item = layout.takeAt(0)
@@ -6926,7 +7149,7 @@ class HomeInterface(QWidget):
 
     def _on_calendar_wheel(self, event):
         if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
-            # 按住了 Ctrl 键：切换月份
+            # 按住了 Ctrl 键切换月份
             delta = event.angleDelta().y()
             if delta > 0:
                 self._change_month(-1)
@@ -6934,10 +7157,10 @@ class HomeInterface(QWidget):
                 self._change_month(1)
             event.accept()  # 拦截事件
         else:
-            # 没有按 Ctrl 键：忽略事件，把滚轮传递给外层的 QScrollArea
+            # 没有按 Ctrl 键忽略事件，把滚轮传递给外层
             event.ignore()
 
-    # ==================== 倒计时管理 ====================
+    #倒计时管理
     def _load_countdown_data(self):
         cfg = load_config()
         events = cfg.get("countdown_events", [])
@@ -6994,7 +7217,7 @@ class HomeInterface(QWidget):
             self._save_countdown_data()
             self.refresh_calendar_card()
 
-    # ==================== 设备监控卡片 ====================
+    #设备监控卡片
     def build_device_card(self, card):
         _c = get_theme_colors()
         layout = card.main_layout
@@ -7144,7 +7367,7 @@ class HomeInterface(QWidget):
         row_top.addLayout(right_dev, stretch=0)
         layout.addLayout(row_top)
 
-    # ==================== 待办卡片 ====================
+    #待办卡片
     def build_todo_card(self, card):
         _c = get_theme_colors()
         layout = card.main_layout
@@ -7168,7 +7391,7 @@ class HomeInterface(QWidget):
         content.addWidget(self.top_student_label)
         layout.addLayout(content)
 
-    # ==================== 生活卡片 ====================
+    # 生活卡片
     def build_life_card(self, card):
         _c = get_theme_colors()
         layout = card.main_layout
@@ -7191,7 +7414,7 @@ class HomeInterface(QWidget):
         content.addWidget(copyright_label)
         layout.addLayout(content)
 
-    # ==================== 刷新数据 ====================
+    #刷新数据
     def refresh_dashboard_data(self):
         now = datetime.now()
         self.time_large.setText(now.strftime("%H:%M"))
@@ -7310,10 +7533,10 @@ class HomeInterface(QWidget):
         self._progress_needs_animation = True
         if hasattr(self, '_animating_bars'):
             self._animating_bars.clear()
-        # ★ 恢复定时器
+        # 恢复定时器
         if not self.refresh_timer.isActive():
             self.refresh_timer.start(1000)
-        # 延迟触发刷新（进度条动画）
+        # 延迟触发刷新进度条动画
         QTimer.singleShot(100, self.refresh_dashboard_data)
 
     def hideEvent(self, event):
@@ -7367,11 +7590,11 @@ class HomeInterface(QWidget):
         count_today = 0
         total_count = 0
 
-        # ---- 读取配置中的累计总数 ----
+        # 读取配置中的累计总数
         cfg = load_config()
         total_count = cfg.get("total_records_count", 0)
 
-        # ---- 首次迁移：若配置计数为0但CSV有数据，自动初始化 ----
+        # 若配置计数为0但CSV有数据，自动初始化
         if total_count == 0 and os.path.exists(DATA_CSV):
             try:
                 df = pd.read_csv(DATA_CSV, encoding="utf-8-sig")
@@ -7382,7 +7605,7 @@ class HomeInterface(QWidget):
             except Exception:
                 pass
 
-        # ---- 统计今日录入（仍从CSV实时计算） ----
+        #统计今日录入
         try:
             df = pd.read_csv(DATA_CSV, encoding="utf-8-sig")
             if not df.empty:
@@ -7392,12 +7615,12 @@ class HomeInterface(QWidget):
         except Exception:
             pass
 
-        # ---- 更新界面标签 ----
+        # 更新界面标签
         self.todo_count_label.setText(f"今日已录入：{count_today} 条")
         self.total_count_label.setText(f"累计录入总条数：{total_count} 条")
 
         
-        # ---- 积分冠军（5 秒缓存，避免每秒读整张 CSV） ----
+        #  积分冠军
         now = time.time()
         cache = getattr(self, "_top_student_cache", None)
         if cache and (now - cache["ts"] < 5.0):
@@ -7436,7 +7659,7 @@ class HomeInterface(QWidget):
         else:
             streak = 1  # 断签重置
 
-        # 计算应得经验（但可能因上限而无法获得）
+        # 计算应得经验
         if streak >= 7:
             exp_gain = SIGN_IN_DAILY_BONUS
         else:
@@ -7446,12 +7669,12 @@ class HomeInterface(QWidget):
         remaining = get_remaining_today_exp()
         actual_gain = min(exp_gain, remaining) if remaining > 0 else 0
 
-        # 更新签到状态（无论如何都保存连续天数）
+        # 更新签到状态
         cfg["sign_in_streak"] = streak
         cfg["last_sign_in_date"] = today
         save_config(cfg)
 
-        # 尝试添加经验（如果 actual_gain > 0）
+        # 尝试添加经验
         if actual_gain > 0:
             success, actual, is_level_up = add_experience(actual_gain, "签到")
             if success:
@@ -7470,19 +7693,19 @@ class HomeInterface(QWidget):
                 show_toast(self, "签到失败，请重试", "error")
                 return
         else:
-            # 经验已满，但签到成功（无经验）
+            # 经验已满，但签到成功
             streak_text = f"连续签到 {streak} 天" if streak < 7 else "连续签到 7+ 天（满勤）"
             show_toast(
                 self,
                 f"签到成功！但今日经验已满，无法获得经验\n{streak_text}",
                 "warning"   # 用警告色提示
             )
-            # 仍触发成就检查（可能解锁连续签到成就）
+            # 仍触发成就检查
             check_and_unlock_achievements()
             return
 
 
-# ======================== 倒计时管理对话框 ========================
+# 倒计时管理对话框
 class CountdownManagerDialog(QDialog):
     def __init__(self, parent, events, selected_index):
         super().__init__(parent)
@@ -7855,7 +8078,7 @@ class RecentRecordsDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(12)
 
-        # ---- 顶部工具栏 ----
+        # 顶部工具栏
         top = QHBoxLayout()
         info_label = QLabel(
             f"显示最近 {self.limit} 条记录（点击左侧方块勾选，双击行可修改/删除）"
@@ -7881,7 +8104,7 @@ class RecentRecordsDialog(QDialog):
         top.addWidget(delete_btn)
         layout.addLayout(top)
 
-        # ---- 表格 ----
+        # 表格
         self.table = QTableWidget()
         install_scrolling_header(self.table)
         self.table.setColumnCount(9)
@@ -7907,7 +8130,7 @@ class RecentRecordsDialog(QDialog):
         self.table.doubleClicked.connect(self.on_double_click)
         layout.addWidget(self.table)
 
-        # ---- 底部 ----
+        # 底部
         bottom = QHBoxLayout()
         self.status_label = QLabel("")
         self.status_label.setStyleSheet("color: #A0A0B0;")
@@ -7920,7 +8143,7 @@ class RecentRecordsDialog(QDialog):
 
         self.load_data()
 
-    # ---------- 点击第一列切换勾选（整列都可点，无需精准点击方块） ----------
+    # 切换勾选
     
 
     def select_all(self):
@@ -7935,7 +8158,7 @@ class RecentRecordsDialog(QDialog):
             if item:
                 item.setCheckState(Qt.CheckState.Unchecked)
 
-    # ---------- 数据加载 ----------
+    #数据加载
     def load_data(self):
         try:
             df = pd.read_csv(DATA_CSV, encoding="utf-8-sig")
@@ -7981,7 +8204,7 @@ class RecentRecordsDialog(QDialog):
 
         self.status_label.setText(f"共显示 {len(recent)} 条记录（总计 {len(df)} 条）")
 
-    # ---------- 勾选删除 ----------
+    #勾选删除
     def get_checked_indices(self):
         result = []
         for i in range(self.table.rowCount()):
@@ -8027,7 +8250,7 @@ class RecentRecordsDialog(QDialog):
         except Exception as e:
             show_toast(self, f"删除失败：{e}", "error")
 
-    # ---------- 双击修改/删除（跳过第一列） ----------
+    # 双击修改/删除
     def on_double_click(self, index):
         row = index.row()
         col = index.column()
@@ -8128,7 +8351,7 @@ class RecentRecordsDialog(QDialog):
             show_toast(self, f"删除失败：{e}", "error")
     
 
-# ======================== 录入页面（焦点跳转逻辑移植自老版 + 优化） ========================
+#录入页面
 class InputInterface(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
@@ -8142,7 +8365,7 @@ class InputInterface(QWidget):
         self.last_discount = load_config().get("last_input_discount", "100")
         self.fix_params = load_config().get("fix_params_serial", False)
 
-        # 新增：读取快捷开关配置
+        # 读取快捷开关配置
         self.enable_shortcut = load_config().get("enable_reason_number_shortcut", True)
 
         self.serial_mode = False
@@ -8227,11 +8450,11 @@ class InputInterface(QWidget):
         self.end_serial.setPlaceholderText("结束学号")
         self.serial_status = QLabel("未开始")
         self.serial_status.setStyleSheet("color: #6C63FF; font-weight: bold;")
-        # ===== 修改后 =====
+     
         self.pause_btn = QPushButton("暂停")
         self.pause_btn.clicked.connect(self.toggle_pause)
-        self.skip_btn = QPushButton("跳过")        # ★ 新增
-        self.skip_btn.clicked.connect(self.skip_serial)   # ★ 新增
+        self.skip_btn = QPushButton("跳过")        
+        self.skip_btn.clicked.connect(self.skip_serial)   
         self.stop_btn = QPushButton("停止")
         self.stop_btn.clicked.connect(self.stop_serial)
         self.fix_check = QCheckBox("固定参数")
@@ -8243,7 +8466,7 @@ class InputInterface(QWidget):
         serial_layout.addWidget(self.end_serial)
         serial_layout.addWidget(self.serial_status)
         serial_layout.addWidget(self.pause_btn)
-        serial_layout.addWidget(self.skip_btn)     # ★ 新增
+        serial_layout.addWidget(self.skip_btn)     
         serial_layout.addWidget(self.stop_btn)
         serial_layout.addWidget(self.fix_check)
         self.serial_widget.setVisible(False)
@@ -8320,10 +8543,10 @@ class InputInterface(QWidget):
         self._setup_tab_order()
         
         self.reason_combo.installEventFilter(self)
-        # 【新增】初始重置，保证进入时表单为默认状态
+        # 保证进入时表单为默认状态
         self.reset_form()
 
-    # ========== 新增：重置表单（核心） ==========
+    # 重置表单
     def reset_form(self):
         """重置录入表单到默认状态（类别=日常，事由=无，清空学号/姓名/分数/赋分，关闭复选框）"""
         self.category_combo.setCurrentText("日常")
@@ -8351,11 +8574,11 @@ class InputInterface(QWidget):
                 self.serial_timer.stop()
                 self.serial_timer = None
 
-    # ========== 界面显示事件（每次进入时重置） ==========
+    #  界面显示事件
     def showEvent(self, event):
         super().showEvent(event)
         self.reset_form()
-        # 【关键】确保过滤器安装到组合框本身（而不是 lineEdit）
+        # 确保过滤器安装到组合框本身
         self.reason_combo.installEventFilter(self)
         if self.serial_mode:
             QTimer.singleShot(50, self.start_serial.setFocus)
@@ -8368,7 +8591,7 @@ class InputInterface(QWidget):
         dialog.exec()
         self.app.refresh_ranking()
 
-    # ---------- 键盘事件 ----------
+    #  键盘事件
     def keyPressEvent(self, event):
         # Ctrl+Enter 提交
         if event.key() == Qt.Key.Key_Return and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
@@ -8381,22 +8604,22 @@ class InputInterface(QWidget):
         # 其他按键交给父类处理
         super().keyPressEvent(event)
 
-    # ---------- 学号列表更新 ----------
+    # 学号列表更新
     def update_student_list(self):
         ids = list(self.app.id_to_name.keys()) if self.app.id_to_name else []
-        # 按学号数字大小排序（若学号非纯数字则回退为字符串排序）
+        # 按学号数字大小排序
         try:
             ids.sort(key=lambda x: int(x))
         except (ValueError, TypeError):
             ids.sort()
         self.stu_id_combo.clear()
-        # 构建 姓名 -> [学号...] 映射（支持重名）
+        # 构建
         self.name_to_ids = {}
         for sid in ids:
             name = self.app.id_to_name.get(sid, "")
             self.stu_id_combo.addItem(f"{sid}  {name}")
             self.name_to_ids.setdefault(name, []).append(sid)
-        # 配置补全器：开启包含匹配，输入姓名/学号片段均可弹出候选
+        # 配置补全器开启包含匹配，输入姓名/学号片段均可弹出候选
         try:
             from PyQt6.QtWidgets import QCompleter
             completer = self.stu_id_combo.completer()
@@ -8405,7 +8628,7 @@ class InputInterface(QWidget):
                 completer.setFilterMode(Qt.MatchFlag.MatchContains)
                 completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
 
-                # ----- 统一补全弹出列表的样式（与 QComboBox 下拉一致） -----
+               
                 popup = completer.popup()
                 if popup is not None:
                     _c = get_theme_colors()
@@ -8433,7 +8656,7 @@ class InputInterface(QWidget):
                         }}
                     """)
 
-                # ----- 连接 activated：从补全列表选中后规范化并切换焦点 -----
+                # 从补全列表选中后规范化并切换焦点
                 try:
                     completer.activated.disconnect()
                 except TypeError:
@@ -8455,22 +8678,22 @@ class InputInterface(QWidget):
         if not text:
             return ""
         text = text.strip()
-        # 1. 整体就是学号
+        # 整体就是学号
         if text in self.app.id_to_name:
             return text
         parts = text.split()
-        # 2. 下拉项格式 '学号  姓名'，取第一段
+        # 下拉项格式 '学号  姓名'，取第一段
         if parts and parts[0] in self.app.id_to_name:
             return parts[0]
-        # 3. 输入的是完整姓名（含重名取第一个）
+        # 输入的是完整姓名（含重名取第一个）
         if hasattr(self, 'name_to_ids') and text in self.name_to_ids:
             ids = self.name_to_ids[text]
             if ids:
                 return ids[0]
-        # 4. '姓名 学号' 形式，最后一段为学号
+        #  '姓名 学号' 形式，最后一段为学号
         if len(parts) >= 2 and parts[-1] in self.app.id_to_name:
             return parts[-1]
-        # 5. 部分姓名匹配：优先前缀匹配，其次子串匹配
+        # 部分姓名匹配优先前缀匹配，其次子串匹配
         if hasattr(self, 'name_to_ids'):
             for name, ids in self.name_to_ids.items():
                 if name.startswith(text) and ids:
@@ -8497,7 +8720,7 @@ class InputInterface(QWidget):
             else:
                 self.name_label.setText("")
 
-    # ---------- 模式切换（增加重置） ----------
+    # 模式切换
     def toggle_serial_mode(self, checked):
         self.serial_mode = checked
         self.single_widget.setVisible(not checked)
@@ -8512,7 +8735,7 @@ class InputInterface(QWidget):
         self._setup_enter_bindings()
         self._setup_tab_order()
 
-    # ---------- 连续模式控制 ----------
+    # 连续模式控制
     def toggle_pause(self):
         if not self.serial_mode or self.current_serial is None:
             return
@@ -8564,7 +8787,7 @@ class InputInterface(QWidget):
         self.date_edit.setText(datetime.now().strftime("%Y-%m-%d"))
 
     def skip_serial(self):
-        """跳过当前学号，直接跳到下一个（不写入任何记录）"""
+        """这个学号跳过不记账，直接下一个，缺勤的同学没准正在家嗨皮"""
         # 未进入连续模式或尚未开始时提示
         if not self.serial_mode or self.current_serial is None:
             show_toast(self, "连续模式未开始，请先输入起止学号并提交", "info")
@@ -8583,20 +8806,20 @@ class InputInterface(QWidget):
         # 学号 +1，刷新状态显示
         self.current_serial += 1
         if self.current_serial > self.serial_end:
-            # ★ 跳过后已全部完成 → 立即自动结束
+            #  跳过后已全部完成立即自动结束
             self._finish_serial()
             return
 
         self.serial_status.setText(f"当前：{self.current_serial}")
 
-        # 非固定参数模式下清空表单（与原有跳过逻辑保持一致）
+      
         if not self.fix_params:
             if not self.keep_reason.isChecked():
                 self.score_edit.clear()
                 self.assign_edit.clear()
                 self.reason_combo.setCurrentText("无")
 
-        # 处理后续流程（固定参数下会自动提交下一个；否则聚焦到事由框）
+        # 处理后续流程
         self._after_submit_serial()
 
     def on_fix_toggled(self, checked):
@@ -8605,7 +8828,7 @@ class InputInterface(QWidget):
         cfg["fix_params_serial"] = checked
         save_config(cfg)
 
-    # ---------- 事由管理 ----------
+    # 事由管理
     def refresh_reasons(self):
         cfg = load_config()
         self.reasons_data = cfg.get("custom_reasons", [])
@@ -8615,7 +8838,7 @@ class InputInterface(QWidget):
         self.reason_combo.addItems(names)
         self.reason_combo.setCurrentText("无")
         
-        # 【关键】安装过滤器到组合框（而不是其 lineEdit）
+        # 安装过滤器到组合框
         self.reason_combo.installEventFilter(self)
         self.enable_shortcut = cfg.get("enable_reason_number_shortcut", True)
 
@@ -8631,13 +8854,13 @@ class InputInterface(QWidget):
                     self.op_minus.setChecked(True)
                 # 设置分数
                 self.score_edit.setText(str(r["score"]))
-                # 设置类别（如果有匹配）
+                # 设置类别
                 category = r.get("category", "")
                 if category:
                     self.category_combo.setCurrentText(category)
                 break
 
-    # ---------- 清空表单（保留原逻辑） ----------
+    #  清空表单
     def clear_form(self):
         if not self.serial_mode:
             if not self.keep_student.isChecked():
@@ -8653,7 +8876,7 @@ class InputInterface(QWidget):
             if not self.keep_reason.isChecked():
                 self.reason_combo.setCurrentText("无")
 
-    # ---------- 提交 ----------
+    #
     def submit(self):
         if self.serial_mode:
             self.do_serial_submit()
@@ -8762,23 +8985,23 @@ class InputInterface(QWidget):
                 return
             self.current_serial = self.serial_start
             self.skipped_ids = []
-            # ★ 修改：直接显示第一个待录学号
+            # 直接显示第一个待录学号
             self.serial_status.setText(f"当前：{self.current_serial}")
             self.pause_btn.setText("暂停")
 
-        # 检查是否完成（兜底，例如暂停后继续时）
+        # 检查是否完成
         if self.current_serial > self.serial_end:
             self._finish_serial()
             return
 
         stu_id = str(self.current_serial)
-        # 学号不在名单中 → 跳过
+        # 学号不在名单中跳过
         if stu_id not in self.app.id_to_name:
             self.skipped_ids.append(stu_id)
             show_toast(self, f"⚠️ 学号 {stu_id} 不在名单中，已跳过", "warning")
             self.current_serial += 1
             if self.current_serial > self.serial_end:
-                # ★ 跳过之后已全部完成 → 立即自动结束
+                # 跳过之后已全部完成立即自动结束
                 self._finish_serial()
                 return
             self.serial_status.setText(f"当前：{self.current_serial}")
@@ -8787,7 +9010,7 @@ class InputInterface(QWidget):
                     self.score_edit.clear()
                     self.assign_edit.clear()
                     self.reason_combo.setCurrentText("无")
-            # 跳过学号后，继续下一个（自动或手动）
+            # 跳过学号后，继续下一个
             self._after_submit_serial()
             return
 
@@ -8804,7 +9027,7 @@ class InputInterface(QWidget):
             show_toast(self, f" 学号 {stu_id} 分数无效，跳过", "error")
             self.current_serial += 1
             if self.current_serial > self.serial_end:
-                # ★ 跳过之后已全部完成 → 立即自动结束
+                # 跳过之后已全部完成立即自动结束
                 self._finish_serial()
                 return
             self.serial_status.setText(f"当前：{self.current_serial}")
@@ -8847,7 +9070,7 @@ class InputInterface(QWidget):
         # 提交完成，递增学号
         self.current_serial += 1
         if self.current_serial > self.serial_end:
-            # ★ 最后一个学号已录完 → 立即自动结束
+            # 最后一个学号已录完立即自动结束
             self._finish_serial()
             return
 
@@ -8872,7 +9095,7 @@ class InputInterface(QWidget):
                 if not self.enable_shortcut:      # 仅当快捷模式关闭时自动弹出
                     self._open_reason_dropdown()
 
-    # ---------- 焦点跳转逻辑（移植自老版 + 优化） ----------
+    # 焦点跳转逻辑
     def _setup_enter_bindings(self):
         # 清除旧的 returnPressed 连接
         for widget in [self.stu_id_combo.lineEdit(), self.reason_combo.lineEdit(),
@@ -8892,7 +9115,7 @@ class InputInterface(QWidget):
             self.reason_combo.lineEdit().returnPressed.connect(self._select_reason_and_focus_score)
             self.score_edit.returnPressed.connect(self.submit)
 
-        # ---------- 新增：下拉列表选择后自动跳转到分数框 ----------
+        # 下拉列表选择后自动跳转到分数框 
         try:
             self.reason_combo.activated.disconnect()
         except TypeError:
@@ -8903,12 +9126,11 @@ class InputInterface(QWidget):
         """设置 Tab 键顺序（按添加顺序已合理，无需额外设置）"""
         pass
 
-    # ---------- 辅助焦点方法 ----------
+    # 辅助焦点方法
     def _on_stu_id_enter(self):
         if self.serial_mode:
             return
-        # 规范化输入：无论输入的是学号、姓名还是混合输入，统一为 "学号  姓名"
-        # （输入汉字姓名时，此处会自动填入列表第一个匹配项）
+        
         stu_id = self._resolve_student_id(self.stu_id_combo.currentText())
         if stu_id and stu_id in self.app.id_to_name:
             name = self.app.id_to_name[stu_id]
@@ -8916,7 +9138,7 @@ class InputInterface(QWidget):
             if self.stu_id_combo.currentText() != normalized:
                 self.stu_id_combo.setCurrentText(normalized)
 
-        # 切换焦点：若事由已填则跳分数，否则跳事由
+        # 切换焦点若事由已填则跳分数
         reason = self.reason_combo.currentText().strip()
         if reason and reason != "无":
             self.score_edit.setFocus()
@@ -8986,7 +9208,7 @@ class InputInterface(QWidget):
 
     
 
-# ======================== 排行页面（新增搜索高亮、Enter 跳转下一个） ========================
+# 排行页面
 class RankingInterface(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
@@ -9008,7 +9230,7 @@ class RankingInterface(QWidget):
         top.addWidget(title)
         top.addStretch()
 
-        # ---- 搜索框 ----
+        # 搜索框
         top.addWidget(QLabel("搜索："))
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("学号或姓名")
@@ -9081,7 +9303,7 @@ class RankingInterface(QWidget):
             return
 
         columns = ["排名", "学号", "姓名", "日常", "听写", "背诵", "班干加分", "考试加分", "赋分总分", "累计总积分"]
-        self.table.setUpdatesEnabled(False)          # ← 新增
+        self.table.setUpdatesEnabled(False)          
         try:
             self.table.setColumnCount(len(columns))
             self.table.setHorizontalHeaderLabels(columns)
@@ -9095,7 +9317,7 @@ class RankingInterface(QWidget):
             for i, row in result.iterrows():
                 self.table.item(i, 1).setData(Qt.ItemDataRole.UserRole, row["学号"])
         finally:
-            self.table.setUpdatesEnabled(True)       # ← 新增
+            self.table.setUpdatesEnabled(True)       
 
         total_scores = result["累计总积分"]
         if not total_scores.empty:
@@ -9109,10 +9331,10 @@ class RankingInterface(QWidget):
         else:
             self.stats_label.setText("暂无积分数据")
 
-        # 清除搜索高亮（因为数据重新加载）
+        # 清除搜索高亮
         self.clear_highlight()
 
-    # ---------- 搜索与高亮 ----------
+    # 搜索与高亮
     def clear_highlight(self):
         """清除所有高亮，重置搜索状态"""
         for row in range(self.table.rowCount()):
@@ -9139,7 +9361,7 @@ class RankingInterface(QWidget):
         if keyword == self.last_keyword and self.search_results:
             self.next_match()
         else:
-            # 否则执行新搜索
+          
             self.search_student()
 
     def search_student(self):
@@ -9209,7 +9431,7 @@ class RankingInterface(QWidget):
         """点击“下一个”按钮或按回车调用，跳转到下一个匹配"""
         self.highlight_next()
 
-    # ---------- 原有功能 ----------
+  
     def on_double_click(self, index):
         row = index.row()
         stu_id_item = self.table.item(row, 1)
@@ -9239,7 +9461,7 @@ class RankingInterface(QWidget):
         msg_box.setText(f"确定要清除所有「{category}」类别的积分记录吗？\n此操作将永久删除该类别的全部数据，不可撤销！")
         msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         msg_box.setDefaultButton(QMessageBox.StandardButton.No)
-        msg_box.setStyleSheet(DIALOG_STYLE)   # ✅ 跟随主题
+        msg_box.setStyleSheet(DIALOG_STYLE)  
         reply = msg_box.exec()
         if reply != QMessageBox.StandardButton.Yes:
             return
@@ -9262,7 +9484,7 @@ class RankingInterface(QWidget):
         except Exception as e:
             show_toast(self, f"清除失败：{e}", "error")
 
-# ======================== 记录明细对话框（表格样式全局） ========================
+# 记录明细对话框
 class RecordDetailDialog(QDialog):
     def __init__(self, parent, stu_id, stu_name, app):
         super().__init__(parent)
@@ -9469,7 +9691,7 @@ class ModifyRecordDialog(QDialog):
         df.to_csv(DATA_CSV, index=False, encoding="utf-8-sig")
         self.accept()
 
-# ======================== 导出页面（按钮样式全局） ========================
+# 导出页面
 class ExportInterface(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
@@ -9502,7 +9724,7 @@ class ExportInterface(QWidget):
 
         
 
-        # ---- 导出积分汇总 ----
+        # 导出积分汇总
         score_group = QGroupBox("导出积分汇总")
         score_group_layout = QVBoxLayout(score_group)
         score_desc = QLabel("选择月份可导出对应月份的积分汇总表，留空则导出全部数据")
@@ -9524,7 +9746,7 @@ class ExportInterface(QWidget):
         score_group_layout.addLayout(export_btn_row)
         layout.addWidget(score_group)
 
-        # ---- 新增：导出成绩总览 ----
+        # 导出成绩总览 
         overview_group = QGroupBox("导出成绩总览")
         overview_layout = QVBoxLayout(overview_group)
         overview_desc = QLabel("导出本次与上次考试的对比总览表（内容参考成绩界面「总览」）")
@@ -9542,12 +9764,12 @@ class ExportInterface(QWidget):
         overview_btn_row.addWidget(score_export_btn)
         overview_layout.addLayout(overview_btn_row)
         layout.addWidget(overview_group)
-        # ---- 新增结束 ----
+      
 
-        # ---- 导入赋分总分 ----
+        # 导入赋分总分
         import_group = QGroupBox("导入赋分总分")
         import_layout = QVBoxLayout(import_group)
-        desc = QLabel("选择包含学号和赋分总分的Excel文件，可指定折扣比例")
+        desc = QLabel("选择包含“学号”列和“赋分总分”列的Excel文件，可指定折扣比例")
         desc.setStyleSheet("color: #A0A0A0;")
         import_layout.addWidget(desc)
         imp_row = QHBoxLayout()
@@ -9628,7 +9850,7 @@ class ExportInterface(QWidget):
             cfg["export_count"] = cfg.get("export_count", 0) + 1
             save_config(cfg)
             check_and_unlock_achievements()
-            # 原有提取路径和显示对话框代码...
+           
             if filepath and os.path.exists(filepath):
                 # 弹出自定义成功对话框
                 self.show_export_success_dialog(filepath)
@@ -9639,7 +9861,7 @@ class ExportInterface(QWidget):
             show_toast(self, msg, "error")
 
     def do_export_score_overview(self):
-        """导出成绩总览对比表（与成绩界面总览视图一致）"""
+        """导出成绩总览对比表"""
         ok, msg = export_score_overview()
         if ok:
             # 增加导出计数
@@ -9683,7 +9905,7 @@ class ExportInterface(QWidget):
         label.setStyleSheet("font-size: 18px; font-weight: bold; color: #64B5F6;")
         layout.addWidget(label)
 
-        # 第一行：打开文件所在位置（独占一行，宽度拉伸填满）
+        # 第一行：打开文件所在位置
         row1 = QHBoxLayout()
         open_dir_btn = QPushButton("📂 打开文件所在位置")
         # 设置水平策略为 Expanding，使其宽度填满整行
@@ -9692,7 +9914,7 @@ class ExportInterface(QWidget):
         row1.addWidget(open_dir_btn)
         layout.addLayout(row1)
 
-        # 第二行：打开 + 确认（两个按钮等宽，中间有间距）
+        # 第二行：打开 + 确认
         row2 = QHBoxLayout()
         row2.setSpacing(15)  # 与下面两个按钮之间的间距
 
@@ -9711,7 +9933,7 @@ class ExportInterface(QWidget):
         dialog.exec()
 
     def _open_file_location(self, filepath):
-        """打开文件所在的文件夹，并高亮选中该文件（跨平台，快速且自动聚焦）"""
+        """打开文件夹并点亮目标文件，Windows走Shell API复用资源管理器，比重新起explorer快多了"""
         if not os.path.exists(filepath):
             show_toast(self, "文件不存在或已被移动", "warning")
             return
@@ -9739,9 +9961,9 @@ class ExportInterface(QWidget):
     def _win_open_and_select(filepath):
         """
         Windows: 调用 Shell API SHOpenFolderAndSelectItems
-        - 复用已运行的资源管理器 → 快
-        - 系统会主动将窗口带到前台 → 自动聚焦
-        返回 True 表示成功，False 表示需要退化处理。
+        - 复用已运行的资源管理器快
+        - 系统会主动将窗口带到前台自动聚焦
+        返回 True 表示成功，False 表示需要退化处理
         """
         try:
             import ctypes
@@ -9890,8 +10112,8 @@ class ExportInterface(QWidget):
             show_toast(self, f" 导入失败：{', '.join(fail[:5])}", "error")
 
 
-# ======================== 存储空间分析 ========================
-# ---------------- 分组保留条数（模块级，供主/子对话框共用） ----------------
+# 存储空间分析 
+# 分组保留条数
 _KEEP_GROUP_PATTERNS = {
     "exports": [
         ("班级积分月度汇总_", "班级积分月度汇总"),
@@ -9924,7 +10146,7 @@ def _all_keep_type_names(key):
 
 
 def apply_keep_counts(key, dir_path):
-    """按类型分组执行保留策略，返回删除的文件数。"""
+    """按类型分组执行保留策略，返回删除的文件数"""
     if key not in _KEEP_GROUP_FIELD:
         return 0
     if not dir_path or not os.path.exists(dir_path):
@@ -9987,18 +10209,16 @@ def _format_size(size_bytes):
     return f"{num} {unit}"
 
 
-# ---------------- 环形图（带进度动画） ----------------
+# 环形图
 class DonutChart(QWidget):
     """
-    环形图：展示磁盘空间的三段构成
-      · 蓝色 = user 已用空间
-      · 紫色 = 磁盘已用空间（不含 user 部分）
-      · 白色 = 磁盘可用空间
-    带进度动画：打开时从 0° 缓动到目标角度（受 enable_progress_animation 控制）
+    蓝 = user已用
+  紫 = 磁盘已用
+    白 = 磁盘还能浪
     """
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.segments = []       # [{"name":..., "size": int, "color": "#RRGGBB"}, ...]
+        self.segments = []       
         self.total_size = 0
         self.center_num = "0"
         self.center_unit = "B"
@@ -10008,7 +10228,7 @@ class DonutChart(QWidget):
         self._progress = 0.0     # 0.0 ~ 1.0
         self._anim = None
 
-    # ---------- Qt property，供 QPropertyAnimation 使用 ----------
+    
     def _get_progress(self):
         return self._progress
 
@@ -10018,7 +10238,7 @@ class DonutChart(QWidget):
 
     progress = pyqtProperty(float, fget=_get_progress, fset=_set_progress)
 
-    # ---------- 对外接口 ----------
+    # 对外接口
     def set_data(self, segments, center_num, center_unit, center_sub, animate=True):
         """设置数据并启动动画"""
         self.segments = segments
@@ -10056,7 +10276,7 @@ class DonutChart(QWidget):
         anim.start()
         self._anim = anim
 
-    # ---------- 绘制 ----------
+    # 绘制
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -10093,10 +10313,10 @@ class DonutChart(QWidget):
         inner_size = size * 0.60
         inner_rect = QRectF(cx - inner_size / 2.0, cy - inner_size / 2.0, inner_size, inner_size)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor(_c["bg_alt"]))) # 改为 bg_alt
+        painter.setBrush(QBrush(QColor(_c["bg_alt"]))) 
         painter.drawEllipse(inner_rect)
 
-        # ---- 中心文字 ----
+        # 中心文字
         num_font = QFont("Microsoft YaHei", 24, QFont.Weight.Bold)
         unit_font = QFont("Microsoft YaHei", 11)
 
@@ -10179,7 +10399,7 @@ class LegendWidget(QWidget):
         self._populate()
 
 
-# ---------------- 大类卡片 ----------------
+# 大类卡片
 class CategoryCard(QFrame):
     """大类卡片：标题 + 右侧按钮 + 大数字 + 描述；点击整卡进入子页"""
     def __init__(self, category, on_open=None, parent=None):
@@ -10283,7 +10503,7 @@ class CategoryCard(QFrame):
             pass
 
 
-# ---------------- 子页（大类下的文件列表） ----------------
+#  子页
 class FileRow(QFrame):
     """文件行：支持双击触发回调"""
     def __init__(self, item, parent_dialog):
@@ -10425,7 +10645,7 @@ class StorageSubDialog(QDialog):
         layout.setContentsMargins(24, 24, 24, 18)
         layout.setSpacing(12)
 
-        # ---- 顶部：标题 + 分组保留条数按钮 ----
+        # 标题 分组保留条数按钮
         top_row = QHBoxLayout()
         title = QLabel(f"{category.get('icon', '📁')}  {category.get('name', '')}")
         title.setStyleSheet("font-size: 20px; font-weight: bold; color: {_c['fg']};")
@@ -10539,7 +10759,7 @@ class StorageSubDialog(QDialog):
         else:
             show_toast(self, "分组保留条数已保存", "success")
 
-    # ==================== 列表填充 ====================
+    #列表填充 
     def _refresh_list(self):
         # 清空旧行
         while self.list_layout.count():
@@ -10602,7 +10822,7 @@ class StorageSubDialog(QDialog):
 
         self.summary_label.setText(summary)
 
-    # ==================== 双击操作 ====================
+    #双击操作
     def open_file_menu(self, item):
         path = item.get("path", "")
         if not path or not os.path.exists(path):
@@ -10672,7 +10892,7 @@ class StorageSubDialog(QDialog):
 
         dlg.exec()
 
-    # ==================== 单文件操作 ====================
+    #单文件操作
     def _open_file_location(self, path):
         try:
             norm = os.path.normpath(path)
@@ -10715,7 +10935,7 @@ class StorageSubDialog(QDialog):
             QDesktopServices.openUrl(QUrl.fromLocalFile(dir_path))
 
 
-# ---------------- 主对话框 ----------------
+# 主对话框
 class StorageAnalyzerDialog(QDialog):
     """存储空间主对话框：大圆环 + 图例 + 大类卡片列表（全部随滚动条滑动）"""
     def __init__(self, parent=None):
@@ -10824,7 +11044,7 @@ class StorageAnalyzerDialog(QDialog):
         close_btn.clicked.connect(self.accept)
         outer_layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
-    # ---------- 以下方法逻辑保持不变 ----------
+ 
     def _collect_category_segments(self):
         segments = []
         for c in self.categories:
@@ -10973,8 +11193,8 @@ class _NeuUpdateWindow(QWidget):
     progress_sig = pyqtSignal(int)
     status_sig   = pyqtSignal(str)
     title_sig    = pyqtSignal(str)
-    ready_sig    = pyqtSignal()   # 下载完成 → 主线程调度 2 秒后重启
-    failed_sig   = pyqtSignal()   # 下载失败 → 主线程调度 3 秒后关闭
+    ready_sig    = pyqtSignal()   
+    failed_sig   = pyqtSignal()   
 
     def __init__(self, version, changelog, download_url):
         super().__init__(None)
@@ -11011,7 +11231,7 @@ class _NeuUpdateWindow(QWidget):
         self.content_stack = QStackedWidget()
         self.content_stack.setStyleSheet("background:transparent;")
 
-        # --- 日志视图 ---
+        #  日志视图
         self.log_view = QWidget()
         log_layout = QVBoxLayout(self.log_view)
         log_layout.setContentsMargins(0, 0, 0, 0)
@@ -11044,7 +11264,7 @@ class _NeuUpdateWindow(QWidget):
         log_layout.addWidget(self.log_browser, alignment=Qt.AlignmentFlag.AlignCenter)
         self.content_stack.addWidget(self.log_view)
 
-        # --- 进度视图 ---
+        # 进度视图
         self.progress_view = QWidget()
         prog_layout = QVBoxLayout(self.progress_view)
         prog_layout.setContentsMargins(0, 0, 0, 0)
@@ -11098,14 +11318,14 @@ class _NeuUpdateWindow(QWidget):
 
         self.main_layout.addWidget(self.btn_container)
 
-        # ★ 全部信号在主线程接收
+        #信号在主线程接收
         self.progress_sig.connect(self._set_percent)
         self.status_sig.connect(self.status_label.setText)
         self.title_sig.connect(self.title_label.setText)
         self.ready_sig.connect(self._on_download_ready)
         self.failed_sig.connect(self._on_download_failed)
 
-    # ---------- 主线程槽 ----------
+    # 主线程槽
     def _set_percent(self, p):
         self.percent_label.setText(f"{p}%")
 
@@ -11117,7 +11337,7 @@ class _NeuUpdateWindow(QWidget):
         """下载失败（主线程）：3 秒后关闭"""
         QTimer.singleShot(3000, self.close)
 
-    # ---------- 子线程 ----------
+    # 子线程
     def start_update(self):
         self.btn_container.setVisible(False)
         self.content_stack.setCurrentWidget(self.progress_view)
@@ -11147,7 +11367,7 @@ class _NeuUpdateWindow(QWidget):
         if self.installer_path:
             UpdateManager.run_installer_and_exit(self.installer_path)
 
-# ======================== 设置页面 ========================
+#设置页面
 
 class AnimationSettingsDialog(QDialog):
     """动画设置：开机动画 + 进度条动画（合并成一个大按钮入口）"""
@@ -11166,7 +11386,7 @@ class AnimationSettingsDialog(QDialog):
         layout.setContentsMargins(25, 22, 25, 22)
         layout.setSpacing(14)
 
-        # ---- 标题 ----
+        # 标题
         title = QLabel("🎬 动画设置")
         title.setStyleSheet("font-size: 20px; font-weight: bold; color: {_c['fg']};")
         layout.addWidget(title)
@@ -11184,7 +11404,7 @@ class AnimationSettingsDialog(QDialog):
 
         cfg = load_config()
 
-        # ---- 开关项 1：开机动画 ----
+        # 开机动画
         row1 = QHBoxLayout()
         info1 = QVBoxLayout()
         info1.setSpacing(2)
@@ -11202,7 +11422,7 @@ class AnimationSettingsDialog(QDialog):
         row1.addWidget(self.boot_switch, alignment=Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(row1)
 
-        # ---- 开关项 2：进度条动画 ----
+        # 进度条动画 
         row2 = QHBoxLayout()
         info2 = QVBoxLayout()
         info2.setSpacing(2)
@@ -11220,7 +11440,7 @@ class AnimationSettingsDialog(QDialog):
         row2.addWidget(self.progress_anim_switch, alignment=Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(row2)
 
-        # ---- 开关项 3：导航栏切换动画 ----
+        # 导航栏切换动画
         row3 = QHBoxLayout()
         info3 = QVBoxLayout()
         info3.setSpacing(2)
@@ -11240,7 +11460,7 @@ class AnimationSettingsDialog(QDialog):
 
         layout.addStretch()
 
-        # ---- 底部按钮 ----
+        #  底部按钮
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         cancel_btn = QPushButton("取消")
@@ -11264,7 +11484,7 @@ class AnimationSettingsDialog(QDialog):
             show_toast(self.parent(), "动画设置已保存", "success")
         self.accept()
 
-# ======================== 粒子效果设置对话框 ========================
+#粒子效果设置对话框
 class ParticleSettingsDialog(QDialog):
     """粒子效果设置：窗口关闭粒子 + 鼠标点击粒子"""
 
@@ -11282,7 +11502,7 @@ class ParticleSettingsDialog(QDialog):
         layout.setContentsMargins(25, 22, 25, 22)
         layout.setSpacing(14)
 
-        # ---- 标题 ----
+        #  标题 
         title = QLabel("✨ 粒子效果")
         title.setStyleSheet("font-size: 20px; font-weight: bold; color: {_c['fg']};")
         layout.addWidget(title)
@@ -11298,7 +11518,7 @@ class ParticleSettingsDialog(QDialog):
         line.setStyleSheet("background: #2A2A3A; max-height: 1px; border: none;")
         layout.addWidget(line)
 
-        # ---- 开关项 1：窗口关闭粒子 ----
+        # 窗口关闭粒子
         cfg = load_config()
 
         row1 = QHBoxLayout()
@@ -11318,7 +11538,7 @@ class ParticleSettingsDialog(QDialog):
         row1.addWidget(self.close_particle_switch, alignment=Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(row1)
 
-        # ---- 开关项 2：鼠标点击粒子 ----
+        # 鼠标点击粒子
         row2 = QHBoxLayout()
         info2 = QVBoxLayout()
         info2.setSpacing(2)
@@ -11336,7 +11556,7 @@ class ParticleSettingsDialog(QDialog):
         row2.addWidget(self.click_particle_switch, alignment=Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(row2)
 
-        # ---- 开关项 3：拖动拖尾粒子 ----
+        #拖动拖尾粒子
         row3 = QHBoxLayout()
         info3 = QVBoxLayout()
         info3.setSpacing(2)
@@ -11354,7 +11574,7 @@ class ParticleSettingsDialog(QDialog):
         row3.addWidget(self.drag_particle_switch, alignment=Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(row3)
 
-        # ---- 开关项 4：鼠标滚动粒子 ----
+        #鼠标滚动粒子
         row4 = QHBoxLayout()
         info4 = QVBoxLayout()
         info4.setSpacing(2)
@@ -11374,7 +11594,7 @@ class ParticleSettingsDialog(QDialog):
 
         layout.addStretch()
 
-        # ---- 底部按钮 ----
+        #  底部按钮
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         cancel_btn = QPushButton("取消")
@@ -11392,16 +11612,15 @@ class ParticleSettingsDialog(QDialog):
         cfg["enable_particle_effect"] = self.close_particle_switch.isChecked()
         cfg["enable_click_particle_effect"] = self.click_particle_switch.isChecked()
         cfg["enable_drag_particle_effect"] = self.drag_particle_switch.isChecked()
-        cfg["enable_scroll_particle_effect"] = self.scroll_particle_switch.isChecked()  # ← 新增
+        cfg["enable_scroll_particle_effect"] = self.scroll_particle_switch.isChecked()  
         save_config(cfg)
 
         if self.parent() is not None:
             show_toast(self.parent(), "粒子效果设置已保存", "success")
         self.accept()
 
-# ======================== 新拟物风格控件（Neumorphism） ========================
-# 用于「密码设置」对话框，整体视觉参照新拟物设计：浅色背景 + 双向柔和阴影
-# 主程序是深色主题，这个对话框独立使用新拟物风格，突出层次感
+# 新拟物风格控件
+
 
 class _NeuColors:
     BASE      = QColor("#e0e5ec")
@@ -11415,12 +11634,10 @@ class _NeuColors:
 
 
 def _hash_password(pwd: str, salt: str = "PickOS_2026_v1") -> str:
-    """密码哈希（SHA-256 + 固定盐）。无法逆向，忘记后不可找回。"""
+    """密码哈希SHA-256，无法逆向，忘记后不可找回，固定盐，防君子不防小人，我不想装新包就用这个了"""
     return hashlib.sha256((salt + pwd).encode("utf-8")).hexdigest()
 
-# ======================== 智能解锁：移动磁盘识别 ========================
-
-# ======================== 智能解锁：开发者 U 盘 ========================
+#我自己U盘，别人拿到没用，除非他能改序列号，嘿嘿嘿
 
 DEVELOPER_USB_SERIALS = {"206DE36F"}
 DEVELOPER_USB_MARKER = "PickOS_DEVELOPER.key"
@@ -11444,7 +11661,7 @@ def is_developer_usb(drive):
 
 
 def find_developer_usb():
-    """查找当前插入的开发者 U 盘（不受智能解锁开关影响）"""
+    """查找当前插入的开发者 U 盘"""
     try:
         for d in get_removable_drives():
             if is_developer_usb(d):
@@ -11479,7 +11696,7 @@ def find_bound_smart_unlock_device():
 
 
 def show_smart_unlock_toast(device, is_developer=False):
-    """统一显示智能解锁成功提示"""
+    """智能解锁成功的统一弹窗，开发者身份还会说声"最高管理员权限"，爽到了"""
     label = device.get("label", "已绑定的移动磁盘")
     if is_developer:
         text = (
@@ -11493,11 +11710,11 @@ def show_smart_unlock_toast(device, is_developer=False):
         toast = _NeuAutoToast(text, duration=1800)
         toast.exec()
     except Exception as e:
-        print(f"⚠️ 智能解锁提示显示失败：{e}")
+        print(f"智能解锁提示显示失败：{e}")
 
 
 def get_removable_drives():
-    """跨平台获取当前挂载的可移动磁盘列表。
+    """跨平台获取当前挂载的可移动磁盘列表
     返回 [{"path": "E:\\", "label": "U盘", "serial": "1234ABCD", "fs": "FAT32"}, ...]
     """
     drives = []
@@ -11741,12 +11958,12 @@ class _NeuButton(_NeuWidget):
         self._anim.setDuration(130)
         self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
-        # ★ 新增：兜底轮询，防止「按下后拖动、release 丢失」导致卡在凹陷状态
+        # 防止按下后拖动导致卡在凹陷状态
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(25)
         self._poll_timer.timeout.connect(self._poll_mouse_released)
 
-    # ---------- ★ 新增：兜底检测 ----------
+    
     def _poll_mouse_released(self):
         if self._down and not (QApplication.mouseButtons() & Qt.MouseButton.LeftButton):
             self._down = False
@@ -11755,7 +11972,7 @@ class _NeuButton(_NeuWidget):
             self._on_force_release()
 
     def _on_force_release(self):
-        """子类可重写：release 丢失被兜底复位时执行的清理逻辑。"""
+        """子类可重写release丢失被复位时执行的清理逻辑"""
         pass
 
     @pyqtProperty(float)
@@ -11777,13 +11994,13 @@ class _NeuButton(_NeuWidget):
         if e.button() == Qt.MouseButton.LeftButton:
             self._down = True
             self._animate_to(1.0)
-            self._poll_timer.start()            # ★ 只在按下期间开，静态零开销
+            self._poll_timer.start()            
 
     def mouseReleaseEvent(self, e):
         was_down = self._down
         self._down = False
         if e.button() == Qt.MouseButton.LeftButton:
-            self._poll_timer.stop()             # ★ 正常路径关掉轮询
+            self._poll_timer.stop()            
             self._animate_to(0.0)
             if was_down and self.rect().contains(e.position().toPoint()):
                 self.clicked.emit()
@@ -11921,7 +12138,7 @@ class _NeuSwitch(QWidget):
         p.end()
 
 class _NeuHintCard(_NeuWidget):
-    """新拟物风格提示卡片（凹陷纯展示，不可点击）"""
+    """新拟物风格提示卡片"""
 
     def __init__(self, text, parent=None):
         super().__init__(parent)
@@ -11957,7 +12174,7 @@ class _NeuTipCard(_NeuWidget):
 
     def __init__(self, text, parent=None, font_size=9):
         super().__init__(parent)
-        # 凸起状态：只画外阴影，视觉上"浮出"背景
+        # 凸起状态只画外阴影，视觉上"浮出"背景
         self._t = 0.0
         self._radius = 16.0
         self._blur = 5
@@ -11965,7 +12182,7 @@ class _NeuTipCard(_NeuWidget):
         self._cache = None
         self._text = text
         self._font = QFont(self.font())
-        self._font.setPointSize(font_size)     # ← 可配置字号
+        self._font.setPointSize(font_size)     
         self.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
         )
@@ -11998,7 +12215,7 @@ class _NeuConfirmDialog(QDialog):
         layout.setContentsMargins(30, 30, 30, 25)
         layout.setSpacing(16)
 
-        # ---- 标题 ----
+        # 标题 
         lbl_title = QLabel(title)
         lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_title.setStyleSheet(
@@ -12006,14 +12223,14 @@ class _NeuConfirmDialog(QDialog):
         )
         layout.addWidget(lbl_title)
 
-        # ---- 正文卡片（凸起，与其它新拟物弹窗风格一致） ----
+        # 正文卡片
         card = _NeuTipCard(text, font_size=12)
         card.setFixedSize(520, 180)
         layout.addWidget(card, alignment=Qt.AlignmentFlag.AlignCenter)
 
         layout.addStretch()
 
-        # ---- 按钮行 ----
+        # 按钮行 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(30)
         btn_row.addStretch()
@@ -12046,7 +12263,7 @@ class _NeuConfirmDialog(QDialog):
         self.move(screen.center() - self.rect().center())
 
 class _NeuAutoToast(QDialog):
-    """新拟物风格自动关闭提示框，用于"智能解锁成功"等即时反馈。"""
+    """新拟物风格自动关闭提示框，用于"智能解锁成功"等即时反馈"""
 
     def __init__(self, text, duration=1800):
         super().__init__(None)
@@ -12102,7 +12319,7 @@ class _ChangePasswordDialog(QDialog):
         layout.setContentsMargins(30, 30, 30, 30)
         layout.setSpacing(18)
 
-        # ===== 标题 =====
+        #标题 
         lbl_title = QLabel("设置新密码")
         lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_title.setStyleSheet(
@@ -12110,7 +12327,7 @@ class _ChangePasswordDialog(QDialog):
         )
         layout.addWidget(lbl_title)
 
-        # ===== 标题与输入框之间：向上突起的圆角矩形说明卡片 =====
+        
         tip = _NeuTipCard(
             "使用 4 位以上密码，可用数字或字母组合\n密码以哈希值加密储存，忘记无法找回！",
             font_size=11,
@@ -12120,7 +12337,7 @@ class _ChangePasswordDialog(QDialog):
 
         layout.addSpacing(10)
 
-        # ===== 输入框：加大字号 =====
+        # 加大字号
         _PWD_STYLE = (
             "QLineEdit{background:transparent;border:none;color:#5a6b8c;"
             "font-size:20pt;font-weight:600;"
@@ -12145,7 +12362,7 @@ class _ChangePasswordDialog(QDialog):
 
         layout.addStretch()
 
-        # ===== 三个按钮 =====
+       
         row = QHBoxLayout()
         row.setSpacing(20)
         row.addStretch()
@@ -12187,50 +12404,50 @@ class _ChangePasswordDialog(QDialog):
         row.addStretch()
         layout.addLayout(row)
 
-        # ===== ★ 新增：Enter 键焦点切换 + 保存 =====
-        # 新密码框按 Enter → 跳到确认密码框
+       
+        # 新密码框按 Enter跳到确认密码框
         self.new_pwd.edit.returnPressed.connect(self._on_new_pwd_enter)
-        # 确认密码框按 Enter → 直接保存
+        # 确认密码框按 Enter直接保存
         self.confirm_pwd.edit.returnPressed.connect(self._save)
 
         # 打开时自动聚焦到新密码框
         QTimer.singleShot(0, self.new_pwd.edit.setFocus)
 
-    # ---------- ★ 新增：新密码框 Enter ----------
+    # 新密码框 Enter 
     def _on_new_pwd_enter(self):
-        """新密码框按 Enter → 焦点跳到确认密码框并全选"""
+        """新密码框按 Enter焦点跳到确认密码框并全选"""
         self.confirm_pwd.edit.setFocus()
         self.confirm_pwd.edit.selectAll()
 
-    # ---------- 按住查看 ----------
+    #  按住查看 
     def _hold_press(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
             self.new_pwd.edit.setEchoMode(QLineEdit.EchoMode.Normal)
             self.confirm_pwd.edit.setEchoMode(QLineEdit.EchoMode.Normal)
-        # ★ 调用父类：启动 poll_timer、做动画
+        # 调用父类做动画
         _NeuButton.mousePressEvent(self.hold_btn, e)
 
     def _hold_release(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
             self.new_pwd.edit.setEchoMode(QLineEdit.EchoMode.Password)
             self.confirm_pwd.edit.setEchoMode(QLineEdit.EchoMode.Password)
-        # ★ 调用父类：关闭 poll_timer、做回弹
+        # 调用父类做回弹
         _NeuButton.mouseReleaseEvent(self.hold_btn, e)
 
-    # ★ 新增：release 丢失被兜底复位时，把密文恢复回来（否则会一直明文显示）
+    # 把密文恢复回来
     def _on_force_release(self):
         self.new_pwd.edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.confirm_pwd.edit.setEchoMode(QLineEdit.EchoMode.Password)
 
     def _save(self):
-        # 保险：按住查看时误点保存 → 先恢复密文再校验
+        # 按住查看时误点保存先恢复密文再校验
         self.new_pwd.edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.confirm_pwd.edit.setEchoMode(QLineEdit.EchoMode.Password)
 
         pwd1 = self.new_pwd.edit.text()
         pwd2 = self.confirm_pwd.edit.text()
 
-        # ★ 失败时把焦点回到出错的框并全选，方便直接重输
+        # 失败时把焦点回到出错的框并全选，方便直接重输
         if not pwd1:
             show_toast(self, "密码不能为空", "warning")
             self.new_pwd.edit.setFocus()
@@ -12250,7 +12467,7 @@ class _ChangePasswordDialog(QDialog):
         cfg["password_hash"] = _hash_password(pwd1)
         save_config(cfg)
 
-        # ★ 先弹成功提示，用户点「确定」后 → 关闭所有对话框并返回设置界面
+        # 先弹成功提示，用户点确定后关闭所有对话框并返回
         self._show_success_tip()
         self._close_all_and_back_to_settings()
 
@@ -12275,7 +12492,7 @@ class _ChangePasswordDialog(QDialog):
 
         lay.addStretch()
 
-        # ★ 加大：220×100，radius 24 → 圆角矩形
+       
         ok_btn = _NeuButton("确定")
         ok_btn.setFixedSize(220, 100)
         ok_btn._radius = 24.0
@@ -12304,7 +12521,7 @@ class _ChangePasswordDialog(QDialog):
         except Exception:
             self.close()
 
-        # 依次关闭父对话框（PasswordSettingsDialog → 设置界面）
+        # 依次关闭父对话框
         for d in parents:
             try:
                 d.accept()
@@ -12344,7 +12561,7 @@ class _SmartUnlockDialog(QDialog):
         layout.setContentsMargins(30, 30, 30, 30)
         layout.setSpacing(14)
 
-        # ===== 标题 =====
+        #标题
         lbl_title = QLabel("智能解锁")
         lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_title.setStyleSheet(
@@ -12352,7 +12569,7 @@ class _SmartUnlockDialog(QDialog):
         )
         layout.addWidget(lbl_title)
 
-        # ===== 说明卡片 =====
+        #说明卡片
         tip = _NeuTipCard(
             "启用后，插入已绑定的移动磁盘即可自动解锁，\n"
             "无需手动输入密码。\n"
@@ -12364,7 +12581,7 @@ class _SmartUnlockDialog(QDialog):
 
         layout.addSpacing(6)
 
-        # ===== 开关行 =====
+        #  开关行
         switch_row = QHBoxLayout()
         switch_row.setContentsMargins(55, 0, 55, 0)
         lbl_switch = QLabel("启用智能解锁")
@@ -12377,14 +12594,14 @@ class _SmartUnlockDialog(QDialog):
         switch_row.addWidget(self.switch)
         layout.addLayout(switch_row)
 
-        # ===== 状态卡片（凹陷，纯展示） =====
+        #状态卡片
         self.status_card = _NeuHintCard("")
         self.status_card.setFixedSize(520, 180)
         layout.addWidget(self.status_card, alignment=Qt.AlignmentFlag.AlignCenter)
 
         layout.addSpacing(4)
 
-        # ===== 操作按钮行（扫描并绑定 / 解除绑定） =====
+        # 操作按钮行扫描并绑定 / 解除绑定
         op_row = QHBoxLayout()
         op_row.setSpacing(20)
         op_row.addStretch()
@@ -12414,7 +12631,7 @@ class _SmartUnlockDialog(QDialog):
 
         layout.addStretch(1)
 
-        # ===== 关闭按钮 =====
+        # 关闭按钮
         close_row = QHBoxLayout()
         close_row.addStretch()
         close_btn = _NeuButton("关闭")
@@ -12429,13 +12646,13 @@ class _SmartUnlockDialog(QDialog):
         close_row.addStretch()
         layout.addLayout(close_row)
 
-        # ===== 居中 =====
+        #居中 
         screen = QApplication.primaryScreen().availableGeometry()
         self.move(screen.center() - self.rect().center())
 
         self._refresh_status()
 
-    # ---------- 状态显示 ----------
+    # 状态显示
     def _refresh_status(self):
         has_device = bool(self._devices)
         self.unbind_btn.setEnabled(has_device)
@@ -12464,7 +12681,7 @@ class _SmartUnlockDialog(QDialog):
         self.status_card._text = text
         self.status_card.update()
 
-    # ---------- 开关 ----------
+    #开关
     def _on_switch(self, checked):
         self._enabled = bool(checked)
         cfg = load_config()
@@ -12474,7 +12691,7 @@ class _SmartUnlockDialog(QDialog):
         show_toast(self, "智能解锁已开启" if checked else "智能解锁已关闭",
                    "success")
 
-    # ---------- 扫描并绑定 ----------
+    # 扫描并绑定
     def _on_bind(self):
         if not self._enabled:
             show_toast(self, "请先开启智能解锁开关", "warning")
@@ -12542,7 +12759,7 @@ class _SmartUnlockDialog(QDialog):
         self._refresh_status()
         show_toast(self, f"已绑定磁盘：{selected['label']}", "success")
 
-    # ---------- 解除绑定 ----------
+    # 解除绑定
     def _on_unbind(self):
         if not self._devices:
             return
@@ -12607,12 +12824,12 @@ class PasswordPromptDialog(QDialog):
         cfg = load_config()
         self.anti_peek = cfg.get("anti_peek_enabled", False)
 
-        # 主布局：左右分栏（边距减小，给内部腾出更多空间）
+        # 主布局：左右分栏
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(30, 30, 30, 30)
         main_layout.setSpacing(30)
 
-        # ================= 左半部分：输入与操作 =================
+        #  左半部分输入与操作
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -12630,7 +12847,7 @@ class PasswordPromptDialog(QDialog):
 
         left_layout.addStretch(1)
 
-        # 大号输入框（减小阴影边距，让输入框可视区域更大）
+        # 大号输入框
         self.pwd_edit = _NeuLineEdit("请输入密码", password=True)
         self.pwd_edit.setFixedSize(460, 140)
         self.pwd_edit._blur = 10
@@ -12687,7 +12904,7 @@ class PasswordPromptDialog(QDialog):
         left_layout.addStretch(1)
         main_layout.addWidget(left_widget, stretch=1)
 
-        # ================= 右半部分：大号数字键盘 =================
+        # 右半部分大号数字键盘
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -12730,7 +12947,7 @@ class PasswordPromptDialog(QDialog):
         screen = QApplication.primaryScreen().availableGeometry()
         self.move(screen.center() - self.rect().center())
         QTimer.singleShot(100, lambda: self.pwd_edit.edit.setFocus())
-        # ===== 智能解锁：实时检测 =====
+        #智能解锁实时检测
         self._smart_timer = None
         self._smart_timer = QTimer(self)
         self._smart_timer.setInterval(1000)   # 1秒检测一次
@@ -12777,7 +12994,7 @@ class PasswordPromptDialog(QDialog):
         if self.anti_peek:
             # 防窥模式：检查是否包含连续的正确密码
             found = False
-            # 因为密码至少4位，所以我们从长度4开始截取
+         
             for i in range(len(input_pwd)):
                 for j in range(i + 4, len(input_pwd) + 1):
                     if _hash_password(input_pwd[i:j]) == pwd_hash:
@@ -12801,9 +13018,10 @@ class PasswordPromptDialog(QDialog):
                 self.pwd_edit.edit.setFocus()
 
     def _check_smart_unlock_live(self):
-        """密码框弹出期间实时检测：
-        1. 开发者 U 盘（无需开关、无需绑定）→ 显示“最高管理员权限”
-        2. 已绑定的普通智能解锁磁盘（需开关开启）
+        """密码框还开着的时候，每秒扫一次有没有插U盘：
+        1. 开发者U盘直接最高权限
+        2. 已绑定的普通盘智能解锁
+一看到就弹提示、自动验证、收工
         """
         try:
             dev = find_developer_usb()
@@ -12826,7 +13044,7 @@ class PasswordPromptDialog(QDialog):
             # 自动通过验证
             self.accept()
         except Exception as e:
-            print(f"⚠️ 智能解锁实时检测失败：{e}")
+            print(f"智能解锁实时检测失败：{e}")
 
     def accept(self):
         if self._smart_timer is not None:
@@ -12847,7 +13065,7 @@ class PasswordPromptDialog(QDialog):
             self._smart_timer = None
         super().closeEvent(event)
 
-# ======================== 密码设置对话框（新拟物风格） ========================
+# 密码设置对话框
 
 class PasswordSettingsDialog(QDialog):
     """密码设置：开启/关闭会联动密码与防窥模式（新拟物风格）"""
@@ -12855,7 +13073,7 @@ class PasswordSettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("🔒 密码设置")
-        self.setFixedSize(650, 700)                       # ← 与更改密码界面一致
+        self.setFixedSize(650, 700)                     
         self.setObjectName("passwordDialog")
         self.setStyleSheet("#passwordDialog{background-color:#e0e5ec;}")
 
@@ -12866,7 +13084,7 @@ class PasswordSettingsDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(40, 28, 40, 28)
-        layout.setSpacing(10)                             # 比原来紧凑，给说明腾空间
+        layout.setSpacing(10)                            
 
         # 标题
         title = QLabel("密码设置")
@@ -12876,7 +13094,7 @@ class PasswordSettingsDialog(QDialog):
         )
         layout.addWidget(title)
 
-        # ===== 第一行：启用密码保护 =====
+        #  第一行启用密码保护
         row1 = QHBoxLayout()
         lbl1 = QLabel("启用密码保护")
         lbl1.setStyleSheet(
@@ -12894,7 +13112,7 @@ class PasswordSettingsDialog(QDialog):
         )
         layout.addWidget(hint1)
 
-        # ===== 第二行：启用防窥模式 =====
+        #  第二行启用防窥模式
         row2 = QHBoxLayout()
         lbl2 = QLabel("启用防窥模式")
         lbl2.setStyleSheet(
@@ -12915,12 +13133,12 @@ class PasswordSettingsDialog(QDialog):
 
         layout.addStretch(1)
 
-        # ===== 第三行：三个等宽按钮，关闭贴最右 =====
+        #三个等宽按钮，关闭贴最右
         row3 = QHBoxLayout()
         row3.setSpacing(20)
         row3.addStretch()
 
-        BTN_W = 180          # ← 170 → 180
+        BTN_W = 180          
         BTN_H = 110
 
         self.change_pwd_btn = _NeuButton("更改密码")
@@ -12961,10 +13179,10 @@ class PasswordSettingsDialog(QDialog):
 
         
 
-    # ---------- 开关联动（保留上一轮的行为） ----------
+    #开关联动
     def _on_pwd_switch(self, checked):
         if checked:
-            # 开启：没密码 → 直接跳设置密码界面
+            # 直接跳设置密码界面
             if not self._pwd_hash:
                 dlg = _ChangePasswordDialog(self)
                 if dlg.exec() != QDialog.DialogCode.Accepted:
@@ -13092,6 +13310,198 @@ class UpdateDialog(QDialog):
         if self.bat_path:
             UpdateManager.restart_and_apply(self.bat_path)
 
+class SubjectManagerDialog(QDialog):
+    """科目管理对话框"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("📚 管理科目")
+        self.resize(700, 560)
+        self.setStyleSheet(DIALOG_STYLE)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(25, 25, 25, 25)
+        layout.setSpacing(15)
+
+        title = QLabel("📚 管理科目")
+        title.setStyleSheet(
+            f"font-size: 20px; font-weight: bold; color: {get_theme_colors()['fg']};"
+        )
+        layout.addWidget(title)
+
+        info = QLabel(
+            "导入成绩时确保有下列科目列和“总分”“原分校名”列\n"
+            "如需使用考试成绩对比（总览）功能，请确保有“赋分总分”“赋分校名”“赋分班名”列\n"
+            "「使用赋分列」开启后，若成绩表存在「科目名赋分」列则优先用它（如 化学 → 化学赋分）。"
+        )
+        info.setStyleSheet("color: #A0A0A0; font-size: 13px;")
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        self.table = QTableWidget()
+        install_scrolling_header(self.table)
+        self.table.setColumnCount(3)
+        self.table.setHorizontalHeaderLabels(["科目名称", "使用赋分列", "顺序"])
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(1, 120)
+        self.table.setColumnWidth(2, 80)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.verticalHeader().setVisible(False)
+        layout.addWidget(self.table)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(10)
+        add_btn = QPushButton("➕ 添加")
+        add_btn.clicked.connect(self.add_subject)
+        edit_btn = QPushButton("✏️ 编辑")
+        edit_btn.clicked.connect(self.edit_subject)
+        delete_btn = QPushButton("🗑️ 删除")
+        delete_btn.clicked.connect(self.delete_subject)
+        up_btn = QPushButton("⬆️ 上移")
+        up_btn.clicked.connect(lambda: self.move_subject(-1))
+        down_btn = QPushButton("⬇️ 下移")
+        down_btn.clicked.connect(lambda: self.move_subject(1))
+        reset_btn = QPushButton("↺ 恢复默认")
+        reset_btn.clicked.connect(self.reset_default)
+        btn_layout.addWidget(add_btn)
+        btn_layout.addWidget(edit_btn)
+        btn_layout.addWidget(delete_btn)
+        btn_layout.addWidget(up_btn)
+        btn_layout.addWidget(down_btn)
+        btn_layout.addStretch()
+        btn_layout.addWidget(reset_btn)
+        layout.addLayout(btn_layout)
+
+        bottom = QHBoxLayout()
+        bottom.addStretch()
+        save_btn = QPushButton("保存")
+        save_btn.clicked.connect(self.save_and_accept)
+        cancel_btn = QPushButton("取消")
+        cancel_btn.clicked.connect(self.reject)
+        bottom.addWidget(save_btn)
+        bottom.addWidget(cancel_btn)
+        layout.addLayout(bottom)
+
+        self.subjects = [dict(s) for s in get_custom_subjects()]
+        self.load_data()
+
+    def load_data(self):
+        self.table.setRowCount(len(self.subjects))
+        for i, s in enumerate(self.subjects):
+            name_item = QTableWidgetItem(s["name"])
+            name_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(i, 0, name_item)
+
+            assign_item = QTableWidgetItem("是" if s.get("use_assign") else "否")
+            assign_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(i, 1, assign_item)
+
+            order_item = QTableWidgetItem(str(i + 1))
+            order_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(i, 2, order_item)
+
+    def _ask_subject(self, title, old_name="", old_use_assign=False):
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        dialog.resize(400, 220)
+        dialog.setStyleSheet(DIALOG_STYLE)
+        lay = QFormLayout(dialog)
+        lay.setContentsMargins(25, 25, 25, 25)
+        lay.setSpacing(14)
+        name_edit = QLineEdit(old_name)
+        name_edit.setPlaceholderText("例如 语文 / 政治 / 信息技术")
+        lay.addRow("科目名称：", name_edit)
+        use_assign_check = QCheckBox("使用赋分列")
+        use_assign_check.setToolTip("若成绩表存在「科目名赋分」列则优先用它")
+        use_assign_check.setChecked(old_use_assign)
+        lay.addRow(use_assign_check)
+        btn_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btn_box.accepted.connect(dialog.accept)
+        btn_box.rejected.connect(dialog.reject)
+        lay.addRow(btn_box)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return None
+        name = name_edit.text().strip()
+        if not name:
+            show_toast(self, "科目名称不能为空", "warning")
+            return None
+        return {"name": name, "use_assign": use_assign_check.isChecked()}
+
+    def add_subject(self):
+        data = self._ask_subject("添加科目")
+        if data is None:
+            return
+        if any(s["name"] == data["name"] for s in self.subjects):
+            show_toast(self, "已存在同科目", "warning")
+            return
+        self.subjects.append(data)
+        self.load_data()
+
+    def edit_subject(self):
+        row = self.table.currentRow()
+        if row < 0:
+            show_toast(self, "请先选择一个科目", "warning")
+            return
+        old = self.subjects[row]
+        data = self._ask_subject("编辑科目", old["name"], old.get("use_assign", False))
+        if data is None:
+            return
+        if any(i != row and s["name"] == data["name"] for i, s in enumerate(self.subjects)):
+            show_toast(self, "已存在同科目", "warning")
+            return
+        self.subjects[row] = data
+        self.load_data()
+
+    def delete_subject(self):
+        row = self.table.currentRow()
+        if row < 0:
+            show_toast(self, "请先选择一个科目", "warning")
+            return
+        name = self.subjects[row]["name"]
+        if QMessageBox.question(
+            self, "确认删除", f"确定要删除科目「{name}」吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        del self.subjects[row]
+        self.load_data()
+
+    def move_subject(self, delta):
+        row = self.table.currentRow()
+        if row < 0:
+            show_toast(self, "请先选择一个科目", "warning")
+            return
+        new_row = row + delta
+        if new_row < 0 or new_row >= len(self.subjects):
+            return
+        self.subjects[row], self.subjects[new_row] = self.subjects[new_row], self.subjects[row]
+        self.load_data()
+        self.table.selectRow(new_row)
+
+    def reset_default(self):
+        if QMessageBox.question(
+            self, "恢复默认", "确定要把科目列表恢复为默认吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        self.subjects = [dict(s) for s in DEFAULT_SUBJECTS]
+        self.load_data()
+
+    def save_and_accept(self):
+        if not self.subjects:
+            show_toast(self, "至少保留一个科目", "warning")
+            return
+        cfg = load_config()
+        cfg["custom_subjects"] = [dict(s) for s in self.subjects]
+        save_config(cfg)
+        show_toast(self, "科目设置已保存", "success")
+        self.accept()
+
 class SettingsInterface(QWidget):
     # 跨线程回传：has_update, latest_ver, changelog, url, error_msg
     _update_result_signal = pyqtSignal(bool, str, str, str, str)
@@ -13104,12 +13514,12 @@ class SettingsInterface(QWidget):
         self.build_ui()
 
     def build_ui(self):
-        # ========== 【新增】外层布局：只放滚动区域 ==========
+        # 外层布局：只放滚动区域
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
 
-        # ========== 【新增】滚动区域 ==========
+        # 滚动区域
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -13140,14 +13550,14 @@ class SettingsInterface(QWidget):
             }
         """)
 
-        # ========== 【新增】内容容器（原来的 self 布局全部放在它里面） ==========
+      
         content_widget = QWidget()
-        content_widget.setObjectName("settingsContentWidget")   # ← 新增
+        content_widget.setObjectName("settingsContentWidget")   
         content_widget.setStyleSheet(
             "QWidget#settingsContentWidget { background: transparent; }"
-        )                                                        # ← 修改
+        )                                                       
 
-        # 主布局：垂直（原来的变量名不变，只是 parent 换成 content_widget）
+   
         main_layout = QVBoxLayout(content_widget)
         main_layout.setContentsMargins(30, 30, 30, 30)
         main_layout.setSpacing(20)
@@ -13157,7 +13567,7 @@ class SettingsInterface(QWidget):
         title.setStyleSheet("font-size: 24px; font-weight: bold; color: {_c['fg']};")
         main_layout.addWidget(title)
 
-        # ----- 等级信息（重新设计） -----
+        # 等级信息
         level_frame = QFrame(self)
         level_frame.setStyleSheet("""
             QFrame {
@@ -13211,33 +13621,33 @@ class SettingsInterface(QWidget):
 
         level_layout.addWidget(middle_widget, stretch=1)   # 占用剩余空间
 
-        # ---- 右侧按钮区域（两个按钮水平排列） ----
+
         # 等级详情按钮
         level_detail_btn = QPushButton("📊 等级详情")
         level_detail_btn.clicked.connect(self.open_level_detail)
         level_layout.addWidget(level_detail_btn)
 
-        # ★ 新增：成就按钮（位于等级详情按钮右侧）
+        # 成就按钮
         achievement_btn = QPushButton("🏆 成就")
         achievement_btn.clicked.connect(self.open_achievement)
         level_layout.addWidget(achievement_btn)
 
         main_layout.addWidget(level_frame)
 
-        # ----- 两列网格布局 -----
+        #两列网格布局 
         grid = QGridLayout()
         grid.setSpacing(18)
         grid.setContentsMargins(0, 0, 0, 0)
 
-        # ---- 左列：外观 + 事由 ----
+        
         left_col = QVBoxLayout()
         left_col.setSpacing(15)
 
-        # 1. 外观组（无折叠）
+        # 外观
         appearance_group = QGroupBox("🎨 外观")
         appearance_layout = QVBoxLayout(appearance_group)
 
-        # 动画设置入口（合并成大按钮，具体开关在弹窗里）
+        # 动画设置入口
         anim_row = QHBoxLayout()
         anim_row.addWidget(QLabel("动画设置："))
         anim_btn = QPushButton("🎬 动画设置")
@@ -13247,7 +13657,7 @@ class SettingsInterface(QWidget):
         anim_row.addStretch()
         appearance_layout.addLayout(anim_row)
 
-        # 粒子效果入口（保持不变）
+        # 粒子效果入口
         particle_row = QHBoxLayout()
         particle_row.addWidget(QLabel("粒子效果："))
         particle_btn = QPushButton("✨ 粒子效果设置")
@@ -13257,7 +13667,7 @@ class SettingsInterface(QWidget):
         particle_row.addStretch()
         appearance_layout.addLayout(particle_row)
 
-        # ---- 密码保护入口（新拟物风格弹窗） ----
+        #  密码保护入口
         pwd_row = QHBoxLayout()
         pwd_row.addWidget(QLabel("密码保护："))
         pwd_btn = QPushButton("🔒 密码设置")
@@ -13267,7 +13677,7 @@ class SettingsInterface(QWidget):
         pwd_row.addStretch()
         appearance_layout.addLayout(pwd_row)
 
-        # ===== 主题色 =====
+        # 主题色
         theme_row = QHBoxLayout()
         theme_row.addWidget(QLabel("主题色："))
         self.theme_combo = QComboBox()
@@ -13281,7 +13691,7 @@ class SettingsInterface(QWidget):
         theme_row.addStretch()
         appearance_layout.addLayout(theme_row)
 
-        # 自定义颜色（仅自定义时显示）
+        # 自定义颜色
         self.theme_custom_widget = QWidget()
         custom_row = QHBoxLayout(self.theme_custom_widget)
         custom_row.setContentsMargins(0, 0, 0, 0)
@@ -13303,7 +13713,7 @@ class SettingsInterface(QWidget):
 
         left_col.addWidget(appearance_group)
 
-        # 2. 事由组
+        # 事由组
         reason_group = QGroupBox("📝 事由")
         reason_layout = QVBoxLayout(reason_group)
         # 事由管理
@@ -13325,7 +13735,7 @@ class SettingsInterface(QWidget):
         shortcut_row.addStretch()
         reason_layout.addLayout(shortcut_row)
         left_col.addWidget(reason_group)
-                # 3. 最近记录组（新增）
+                # 最近记录组
         record_group = QGroupBox("📋 最近记录")
         record_layout = QVBoxLayout(record_group)
 
@@ -13350,11 +13760,27 @@ class SettingsInterface(QWidget):
         # 将左列加入网格（第0行，第0列）
         grid.addLayout(left_col, 0, 0)
 
-        # ---- 右列：总览 + 数据管理 ----
+        
         right_col = QVBoxLayout()
         right_col.setSpacing(15)
 
-        # 3. 总览组
+        # 科目组
+        subject_group = QGroupBox("📚 科目")
+        subject_layout = QVBoxLayout(subject_group)
+        subj_row = QHBoxLayout()
+        subj_row.addWidget(QLabel("科目管理："))
+        subj_btn = QPushButton("📚 管理科目")
+        subj_btn.clicked.connect(self.open_subject_manager)
+        subj_row.addWidget(subj_btn)
+        subj_row.addStretch()
+        subject_layout.addLayout(subj_row)
+        subj_tip = QLabel("（用于成绩单科王和考试加分规则；可设置是否使用赋分列）")
+        subj_tip.setStyleSheet("color: #A0A0A0; font-size: 12px;")
+        subj_tip.setWordWrap(True)
+        subject_layout.addWidget(subj_tip)
+        right_col.addWidget(subject_group)
+
+        #总览组
         overview_group = QGroupBox("📊 总览")
         overview_layout = QVBoxLayout(overview_group)
         # 显示人数
@@ -13415,11 +13841,11 @@ class SettingsInterface(QWidget):
         storage_row.addStretch()
         data_layout.addLayout(storage_row)
         right_col.addWidget(data_group)
-        # ---- 5. 帮助组（新增） ----
+        # 帮助组
         help_group = QGroupBox("📖 帮助")
         help_layout = QVBoxLayout(help_group)
 
-        # ---- 检查更新 ----
+        # 检查更新
         update_row = QHBoxLayout()
         update_row.addWidget(QLabel("版本更新："))
         check_update_btn = QPushButton("🔄 检查更新")
@@ -13428,7 +13854,7 @@ class SettingsInterface(QWidget):
         update_row.addStretch()
         help_layout.addLayout(update_row)
 
-        # ---- 使用指南 ----
+        # 使用指南
         guide_row = QHBoxLayout()
         guide_row.addWidget(QLabel("使用指南："))
         guide_btn = QPushButton("📖 查看使用指南")
@@ -13437,7 +13863,7 @@ class SettingsInterface(QWidget):
         guide_row.addStretch()
         help_layout.addLayout(guide_row)
 
-        # ---- 新手引导（新增）----
+        # 新手引导
         onboard_row = QHBoxLayout()
         onboard_row.addWidget(QLabel("新手引导："))
         onboard_btn = QPushButton("🎯 重新查看新手引导")
@@ -13452,24 +13878,24 @@ class SettingsInterface(QWidget):
 
         right_col.addWidget(help_group)
 
-        # 将右列加入网格（第0行，第1列）
+        # 将右列加入网格
         grid.addLayout(right_col, 0, 1)
 
         # 将网格加入主布局
         main_layout.addLayout(grid)
 
-        # 返回按钮（居中对齐）
+        # 返回按钮居中对齐
         back_btn = QPushButton("🔙 返回主菜单")
         back_btn.clicked.connect(lambda: self.app.switchTo(self.app.homeInterface))
         main_layout.addWidget(back_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         main_layout.addStretch()
 
-        # ========== 【新增】把内容装进滚动区域 ==========
+        # 把内容装进滚动区域
         scroll.setWidget(content_widget)
         outer_layout.addWidget(scroll)
 
-    # ---- 新增：成就按钮回调 ----
+    # 成就按钮回调
     def open_achievement(self):
         dialog = AchievementDialog(self)
         dialog.exec()
@@ -13523,7 +13949,7 @@ class SettingsInterface(QWidget):
         def _on_finish():
             # 引导关闭（无论完成还是 Alt+F4）都走这里
             self._onboarding = None
-            # 引导过程中可能改动了名单，刷新一下
+         
             try:
                 if hasattr(main_win, "inputInterface"):
                     main_win.inputInterface.update_student_list()
@@ -13566,7 +13992,7 @@ class SettingsInterface(QWidget):
         self.theme_custom_widget.setVisible(mode == "custom")
         if mode == "custom":
             self._refresh_theme_color_preview()
-        # ★ 无论是深色、浅色还是自定义，切换后都询问是否重启
+        # 颜色切换后都询问是否重启
         self._ask_restart_for_theme()
             
 
@@ -13648,27 +14074,27 @@ class SettingsInterface(QWidget):
 
     def format_data(self):
         """格式化所有数据（三次确认后删除 user 文件夹并重启）"""
-        # ---- 第一次确认 ----
+        #  第一次确认
         msg_box1 = QMessageBox(self)
         msg_box1.setWindowTitle("确认格式化")
         msg_box1.setText("⚠️ 是否确定要格式化所有数据？\n此操作将 **永久删除** 所有用户数据（包括名单、积分、配置、便签等），并重启程序。")
         msg_box1.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         msg_box1.setDefaultButton(QMessageBox.StandardButton.No)
-        msg_box1.setStyleSheet(DIALOG_STYLE)   # ✅ 跟随主题
+        msg_box1.setStyleSheet(DIALOG_STYLE)   # 跟随主题
         if msg_box1.exec() != QMessageBox.StandardButton.Yes:
             return
 
-        # ---- 第二次确认 ----
+        # 第二次确认
         msg_box2 = QMessageBox(self)
         msg_box2.setWindowTitle("二次确认")
         msg_box2.setText("格式化将删除全部数据，确认继续？")
         msg_box2.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         msg_box2.setDefaultButton(QMessageBox.StandardButton.No)
-        msg_box2.setStyleSheet(DIALOG_STYLE)   # ✅ 直接复用，不需要再引用 msg_box1
+        msg_box2.setStyleSheet(DIALOG_STYLE)   # 直接复用，不需要再引用 msg_box1
         if msg_box2.exec() != QMessageBox.StandardButton.Yes:
             return
 
-        # ---- 第三次：输入验证 ----
+        # 输入验证
         text, ok = QInputDialog.getText(
             self,
             "输入验证",
@@ -13679,7 +14105,7 @@ class SettingsInterface(QWidget):
             show_toast(self, "输入错误，操作取消", "warning")
             return
 
-        # ---- 执行删除 ----
+        #执行删除
         try:
             if os.path.exists(USER_DIR):
                 shutil.rmtree(USER_DIR)
@@ -13691,13 +14117,13 @@ class SettingsInterface(QWidget):
             show_toast(self, f"格式化失败：{e}", "error")
             return
 
-        # ========== 关键修复：立即重建目录和默认配置文件 ==========
+        # 立即重建目录和默认配置文件 
         os.makedirs(USER_DIR, exist_ok=True)
         os.makedirs(DATA_DIR, exist_ok=True)
         os.makedirs(EXPORT_DIR, exist_ok=True)
         os.makedirs(BACKUP_DIR, exist_ok=True)
 
-        # 生成默认配置（与 load_config() 的默认值保持一致）
+        # 生成默认配置
         default_cfg = {
             "student_file": DEFAULT_STUDENT_EXCEL,
             "template_file": "",
@@ -13742,16 +14168,16 @@ class SettingsInterface(QWidget):
             "backup_count": 0,
             "recent_records_limit": 100,   # 最近录入记录显示条数
             "enable_progress_animation": True,
-            "enable_particle_effect": True,      # ← 新增：弹窗关闭粒子效果
-            "enable_click_particle_effect": True,   # ← 新增：鼠标点击粒子
-            "enable_drag_particle_effect": True,   # ← 新增：拖动拖尾粒子
-            "enable_scroll_particle_effect": True, # ← 新增：鼠标滚动粒子
-            "enable_nav_animation": True,          # ← 新增：导航栏切换动画
-            # ---- 主题 ----
+            "enable_particle_effect": True,      # 弹窗关闭粒子效果
+            "enable_click_particle_effect": True,   # 鼠标点击粒子
+            "enable_drag_particle_effect": True,   # 拖动拖尾粒子
+            "enable_scroll_particle_effect": True, # 鼠标滚动粒子
+            "enable_nav_animation": True,          # 导航栏切换动画
+            #  主题 
             "theme_mode": "light",          # dark / light / custom
-            "theme_bg": "#16161E",         # 自定义模式下的窗口颜色
-            "theme_fg": "#E0E0E0",         # 自定义模式下的文字颜色
-            # 按类型分别保留条数（每种类型各自独立计数）
+            "theme_bg": "#16161E",         # 窗口颜色
+            "theme_fg": "#E0E0E0",         # 文字颜色
+            # 按类型分别保留条数
             "export_keep_counts": {
                 "班级积分月度汇总": 5,
                 "成绩总览对比": 5,
@@ -13763,45 +14189,58 @@ class SettingsInterface(QWidget):
                 "积分记录": 5,
                 "其它": 5,
             },
-        # ---- 密码保护 ----
-        "password_enabled": False,     # ← 新增
-        "password_hash": "",           # ← 新增
-        "anti_peek_enabled": False,    # ← 新增：防窥模式
-        # ---- 智能解锁（U 盘） ----
+        # 自定义科目
+        "custom_subjects": [
+            {"name": "语文", "use_assign": False},
+            {"name": "数学", "use_assign": False},
+            {"name": "英语", "use_assign": False},
+            {"name": "物理", "use_assign": False},
+            {"name": "化学", "use_assign": True},
+            {"name": "生物", "use_assign": True},
+        ],
+        #密码保护
+        "password_enabled": False,     
+        "password_hash": "",          
+        "anti_peek_enabled": False,    
+        #  智能解锁
         "smart_unlock_enabled": False,
         "smart_unlock_device": [],        
-        "onboarding_completed": False,   # ← 新增：是否已完成新手引导
+        "onboarding_completed": False,   
         }
         with open(CONFIG_JSON, "w", encoding="utf-8") as f:
             json.dump(default_cfg, f, ensure_ascii=False, indent=2)
 
-        # ---- 显示重启提示（使用统一的 QMessageBox 样式） ----
-        # ---- 最后的"操作完成"提示 ----
+    
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("操作完成")
         msg_box.setText("✅ 数据已删除，程序将自动重启。")
         msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
         msg_box.setDefaultButton(QMessageBox.StandardButton.Ok)
-        msg_box.setStyleSheet(DIALOG_STYLE)   # ✅ 跟随主题（同时自动修掉原代码的 #42A5F6 笔误）
+        msg_box.setStyleSheet(DIALOG_STYLE)   
         msg_box.exec()
 
         # 延迟重启
         QTimer.singleShot(1000, self._restart_app)
 
     def _restart_app(self):
-        """重启当前应用程序（修复打包后重启双开问题）"""
+        """重启当前应用程序"""
         import subprocess
         import sys
+       
+        try:
+            app = QApplication.instance()
+            if app is not None and hasattr(app, "single_instance_manager"):
+                app.single_instance_manager.stop_server()
+        except Exception as e:
+            print(f"停止单实例服务失败：{e}")
         if getattr(sys, "frozen", False):
-            # 打包后的 exe 环境：sys.argv[0] 是 exe 本身，不能再次传入，否则会启动两个进程
             subprocess.Popen([sys.executable] + sys.argv[1:])
         else:
-            # 源码运行环境：sys.argv[0] 是脚本名，必须传入
             subprocess.Popen([sys.executable] + sys.argv)
         QApplication.quit()
 
     def _ask_restart_for_theme(self):
-        """主题修改后弹出确认框：左边重启、右边取消"""
+        """主题修改后弹出确认框"""
         _c = get_theme_colors()
         dialog = QDialog(self)
         dialog.setWindowTitle("主题已保存")
@@ -13923,6 +14362,15 @@ class SettingsInterface(QWidget):
         dialog = ParticleSettingsDialog(self)
         dialog.exec()
 
+    def open_subject_manager(self):
+        dialog = SubjectManagerDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            try:
+                if hasattr(self.app, 'scoreInterface') and self.app.scoreInterface is not None:
+                    self.app.scoreInterface.load_saved_data()
+            except Exception as e:
+                print(f"刷新成绩页失败：{e}")
+
     def open_password_settings(self):
         """打开密码设置对话框（新拟物风格）"""
         cfg = load_config()
@@ -13936,11 +14384,11 @@ class SettingsInterface(QWidget):
 
     
 
-# ======================== 使用指南对话框 ========================
+#使用指南对话框
 USER_GUIDE_TEXT = """===============================
 PickOS 班级管理系统使用指南
 ===============================
-版本：v6.4.0.110
+版本：v6.4.1.125
 适用平台：Windows / macOS / Linux（正在努力适配HarmonyOS，敬请期待...）
 联系创作者：2892065430@qq.com
 
@@ -14446,7 +14894,7 @@ class UserGuideDialog(QDialog):
         self.resize(1000, 760)
         self.setStyleSheet(DIALOG_STYLE)
 
-        # ---- 搜索状态 ----
+        # 搜索状态
         self.search_matches = []      # 所有匹配位置的字符索引
         self.search_index = -1        # 当前高亮的匹配索引
         self.last_keyword = ""        # 上次搜索的关键词
@@ -14460,12 +14908,12 @@ class UserGuideDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(12)
 
-        # ---- 标题 ----
+        # 标题
         title = QLabel("📖 PickOS 班级管理系统使用指南")
         title.setStyleSheet("font-size: 20px; font-weight: bold; color: {_c['fg']};")
         layout.addWidget(title)
 
-        # ---- 工具行 ----
+        # 工具行
         toolbar = QHBoxLayout()
         toolbar.setSpacing(8)
 
@@ -14477,34 +14925,34 @@ class UserGuideDialog(QDialog):
         toolbar.addWidget(self.search_edit)
 
         find_btn = QPushButton("🔍 查找")
-        find_btn.setMinimumWidth(110)      # ← 改：自适应宽度
+        find_btn.setMinimumWidth(110)      # 自适应宽度
         find_btn.setMinimumHeight(34)
         find_btn.clicked.connect(self._do_search)
         toolbar.addWidget(find_btn)
 
         self.next_btn = QPushButton("下一个")
-        self.next_btn.setMinimumWidth(100)  # ← 改
+        self.next_btn.setMinimumWidth(100)  
         self.next_btn.setMinimumHeight(34)
         self.next_btn.setEnabled(False)
         self.next_btn.clicked.connect(self._next_match)
         toolbar.addWidget(self.next_btn)
 
         clear_btn = QPushButton("清除高亮")
-        clear_btn.setMinimumWidth(120)      # ← 改：四个中文字要宽一点
+        clear_btn.setMinimumWidth(120)      
         clear_btn.setMinimumHeight(34)
         clear_btn.clicked.connect(self._clear_highlight)
         toolbar.addWidget(clear_btn)
 
         toolbar.addStretch()
 
-        # ---- 状态标签 ----
+        # 状态标签
         self.status_label = QLabel("")
         self.status_label.setStyleSheet("color: #A0A0B0; font-size: 13px;")
         toolbar.addWidget(self.status_label)
 
         toolbar.addStretch()
 
-        # ---- 字号 ----
+        # 字号
         toolbar.addWidget(QLabel("字号："))
         self.font_size_spin = QSpinBox()
         self.font_size_spin.setRange(10, 24)
@@ -14515,33 +14963,33 @@ class UserGuideDialog(QDialog):
 
         layout.addLayout(toolbar)
 
-        # ---- 指南内容浏览器 ----
+        # 指南内容浏览器
         self.browser = QTextBrowser()
         self.browser.setOpenExternalLinks(True)
         self.browser.setPlainText(USER_GUIDE_TEXT)
         layout.addWidget(self.browser)
-        # 统一通过 _apply_font_size 初始化样式（含 font-size，保证字号可控）
+      
         self._apply_font_size(self.current_font_size)
 
-        # ---- 底部按钮 ----
+        # 底部按钮
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
         copy_btn = QPushButton("📋 复制全文")
-        copy_btn.setMinimumWidth(130)      # ← 改
+        copy_btn.setMinimumWidth(130)      
         copy_btn.setMinimumHeight(34)
         copy_btn.clicked.connect(self._copy_all)
         btn_layout.addWidget(copy_btn)
 
         close_btn = QPushButton("关闭")
-        close_btn.setMinimumWidth(90)      # ← 改
+        close_btn.setMinimumWidth(90)     
         close_btn.setMinimumHeight(34)
         close_btn.clicked.connect(self.accept)
         btn_layout.addWidget(close_btn)
 
         layout.addLayout(btn_layout)
 
-    # ==================== 搜索逻辑 ====================
+    # 搜索逻辑
     def _do_search(self):
         """执行搜索：关键词变了就重新搜索全部匹配；否则跳到下一个"""
         keyword = self.search_edit.text().strip()
@@ -14549,16 +14997,16 @@ class UserGuideDialog(QDialog):
             self._clear_highlight()
             return
 
-        # 同一个关键词 → 跳到下一个
+        #跳到下一个
         if keyword == self.last_keyword and self.search_matches:
             self._next_match()
             return
 
-        # 新关键词 → 清空旧结果并重新搜索
+        #  清空旧结果并重新搜索
         self._clear_highlight(keep_keyword=True)
         self.last_keyword = keyword
 
-        # 找到所有匹配（字符索引）
+        # 找到所有匹配
         text = self.browser.toPlainText()
         matches = []
         start = 0
@@ -14639,7 +15087,7 @@ class UserGuideDialog(QDialog):
         if not keep_keyword:
             self.last_keyword = ""
 
-    # ==================== 字号调整 ====================
+    #字号调整
     def _apply_font_size(self, size):
         """调整字号：通过 QSS 强制覆盖，100% 生效"""
         self.current_font_size = size
@@ -14672,7 +15120,7 @@ class UserGuideDialog(QDialog):
         if self.search_matches:
             self._highlight_all_matches()
 
-    # ==================== 复制 ====================
+    #复制
     def _copy_all(self):
         clipboard = QApplication.clipboard()
         clipboard.setText(USER_GUIDE_TEXT)
@@ -14734,11 +15182,11 @@ class LevelDetailDialog(QDialog):
             }
         """)
         layout.addWidget(progress_bar)
-        # 延迟触发动画：等对话框显示后再启动，否则动画可能在不可见时跑完
+        # 延迟触发动画等对话框显示后再启动
         QTimer.singleShot(100, lambda pb=progress_bar, v=int(progress):
                           animate_progress_bar(pb, v))
 
-        # 升级所需经验（若未满级）
+        # 升级所需经验
         if level < MAX_LEVEL:
             need_label = QLabel(f"升级还需 {exp_needed:.0f} 经验")
             need_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -14801,8 +15249,8 @@ class AchievementDialog(QDialog):
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         scroll_widget = QWidget()
-        scroll_widget.setStyleSheet("background: transparent;")   # 新增：背景透明
-        scroll_widget.setAutoFillBackground(False)               # 新增：禁用自动填充背景
+        scroll_widget.setStyleSheet("background: transparent;")   
+        scroll_widget.setAutoFillBackground(False)               
         self.grid_layout = QGridLayout(scroll_widget)
         self.grid_layout.setSpacing(8)
         scroll.setWidget(scroll_widget)
@@ -15103,7 +15551,7 @@ class ExperienceLogDialog(QDialog):
             show_toast(self, "经验日志已清空", "info")
     
 
-# ======================== 事由管理对话框 ========================
+#事由管理对话框
 class ReasonManagerDialog(QDialog):
     def __init__(self, parent, app):
         super().__init__(parent)
@@ -15484,7 +15932,7 @@ class CategoryEditDialog(QDialog):
         self.accept()
 
 class ListManagerInterface(QWidget):
-    """自定义名单管理页面（类似成绩总览布局，支持类别条目，含序号列）"""
+    """自定义名单管理页面"""
     def __init__(self, parent):
         super().__init__(parent)
         self.app = parent
@@ -15499,7 +15947,7 @@ class ListManagerInterface(QWidget):
         layout.setContentsMargins(30, 30, 30, 30)
         layout.setSpacing(15)
 
-        # ---- 顶部行：标题 + 下拉框 + 名单操作按钮 ----
+        #顶部行：标题 + 下拉框 + 名单操作按钮
         top = QHBoxLayout()
         title = TitleLabel("📋 名单管理", self)
         title.setStyleSheet("font-size: 24px; font-weight: bold; color: {_c['fg']};")
@@ -15529,18 +15977,18 @@ class ListManagerInterface(QWidget):
 
         layout.addLayout(top)
 
-        # ---- 条目表格（增加序号列） ----
+        # 条目表格
         self.table = QTableWidget()
         install_scrolling_header(self.table)
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(["序号", "类别", "成员", "加分"])
 
-        # ★ 关键：一创建就开启自动换行，不要等到 setItem 之后
+        # 一创建就开启自动换行
         self.table.setWordWrap(True)
-        # ★ 关键：不允许省略号，保证内容完整换行显示
+        # 保证内容完整换行显示
         self.table.setTextElideMode(Qt.TextElideMode.ElideNone)
 
-        # ★ 关键：分列设置宽度策略，让"成员"列拿到剩余空间，序号/加分列给固定宽度
+        # 分列设置宽度
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)        # 序号
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)  # 类别
@@ -15557,7 +16005,7 @@ class ListManagerInterface(QWidget):
         self.table.verticalHeader().setVisible(False)
         layout.addWidget(self.table)
 
-        # ---- 底部：统计 + 条目操作按钮 ----
+       
         bottom = QHBoxLayout()
         self.item_count_label = QLabel("共 0 项")
         self.item_count_label.setStyleSheet("color: #A0A0B0; font-size: 15px;")
@@ -15575,14 +16023,14 @@ class ListManagerInterface(QWidget):
 
         layout.addLayout(bottom)
 
-        # ---- 返回按钮 ----
+        # 返回按钮
         back_btn = QPushButton("🔙 返回主菜单")
         back_btn.clicked.connect(lambda: self.app.switchTo(self.app.homeInterface))
         layout.addWidget(back_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.clear_table()
 
-    # ---------- 名单下拉框 ----------
+    #名单下拉框 
     def refresh_combo(self):
         current_name = self.combo.currentText() if self.combo.count() > 0 else ""
         self.combo.clear()
@@ -15612,7 +16060,7 @@ class ListManagerInterface(QWidget):
         self.current_index = index
         self.show_items(index)
 
-    # ---------- 表格显示 ----------
+    # 表格显示
     def show_items(self, index):
         items = self.custom_lists[index]["items"]
         self.table.setRowCount(len(items))
@@ -15637,7 +16085,7 @@ class ListManagerInterface(QWidget):
             else:
                 member_str = ""
             member_item = QTableWidgetItem(member_str)
-            # ★ 关键：成员列左对齐，配合换行显示更自然
+            #  成员列左对齐
             member_item.setTextAlignment(
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
             )
@@ -15648,7 +16096,7 @@ class ListManagerInterface(QWidget):
             bonus_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(i, 3, bonus_item)
 
-        self.table.setUpdatesEnabled(False)              # ← 新增
+        self.table.setUpdatesEnabled(False)              
         try:
             self.table.setRowCount(len(items))
             for i, item in enumerate(items):
@@ -15677,7 +16125,7 @@ class ListManagerInterface(QWidget):
                 bonus_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.table.setItem(i, 3, bonus_item)
         finally:
-            self.table.setUpdatesEnabled(True)           # ← 新增
+            self.table.setUpdatesEnabled(True)         
 
         self.item_count_label.setText(f"共 {len(items)} 项")
 
@@ -15703,7 +16151,7 @@ class ListManagerInterface(QWidget):
         self.table.setRowCount(0)
         self.item_count_label.setText("共 0 项")
 
-    # ---------- 名单操作 ----------
+    # 名单操作
     def add_list(self):
         name, ok = QInputDialog.getText(self, "新建名单", "请输入名单名称：")
         if ok and name.strip():
@@ -15860,14 +16308,14 @@ class ListManagerInterface(QWidget):
             if ok:
                 success_count += 1
             else:
-                print(f"加分失败：{sid} {name}，{msg}")  # 可选日志
+                print(f"加分失败：{sid} {name}，{msg}") 
 
         show_toast(self, f"成功为 {success_count} 名学生添加班干加分", "success")
-        # 刷新排行榜（如果主窗口有刷新方法）
+        # 刷新排行榜
         if hasattr(self.app, 'refresh_ranking'):
             self.app.refresh_ranking()
 
-    # ---------- 条目操作 ----------
+    # 条目操作
     def add_item(self):
         if self.current_index < 0:
             show_toast(self, "请先选择一个名单", "warning")
@@ -15921,12 +16369,12 @@ class ListManagerInterface(QWidget):
             self.show_items(self.current_index)
             show_toast(self, "条目已更新", "success")
 
-# ======================== 关于页面 ========================
+# 关于页面
 
 class AboutInterface(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
-        _c = get_theme_colors()                 # ★ 新增
+        _c = get_theme_colors()                 
         self.app = parent
         self.setObjectName("aboutInterface")
         self.click_count = 0
@@ -15940,7 +16388,7 @@ class AboutInterface(QWidget):
 
         title_label = QLabel("📖 关于本系统", self)
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # ★ 修复：原字符串少了 f 前缀
+        
         title_label.setStyleSheet(
             f"font-family: 'Segoe UI'; font-size: 32px; "
             f"font-weight: bold; color: {_c['fg']};"
@@ -15952,7 +16400,7 @@ class AboutInterface(QWidget):
         info_layout.setContentsMargins(0, 0, 0, 0)
         info_layout.setSpacing(4)
 
-        # ★ 修改：color 缺省时使用主题前景色，避免浅色主题下白字看不见
+       
         def add_line(text, font_size=24, color=None, bold=False, clickable=False):
             if color is None:
                 color = _c["fg"]
@@ -15983,7 +16431,7 @@ class AboutInterface(QWidget):
             clickable=True
         )
         self.version_label.mousePressEvent = self.on_version_click
-        self.default_text_color = _c["fg_bright"]      # ★ 原为 "#FFFFFF"
+        self.default_text_color = _c["fg_bright"]      
 
         add_empty_line(14)
         add_line("【系统状态】：运行中")
@@ -16019,7 +16467,7 @@ class AboutInterface(QWidget):
         self.click_count += 1
         self.last_click_time = now
 
-        # 高亮蓝色（保持原有的彩蛋交互）
+        # 高亮蓝色
         self.version_label.setStyleSheet(
             "font-family: 'Microsoft YaHei'; font-size: 24px; "
             "color: #00BFFF; font-weight: bold;"
@@ -16036,14 +16484,14 @@ class AboutInterface(QWidget):
             self.app.show_heart_animation()
 
     def restore_version_color(self):
-        # ★ 修复：使用主题前景色，不再固定为白色
+        
         self.version_label.setStyleSheet(
             f"font-family: 'Microsoft YaHei'; font-size: 24px; "
             f"color: {self.default_text_color}; font-weight: bold;"
         )
         self._restore_timer = None
 
-    # update_time / on_destroy 原样保留
+ 
 
     def update_time(self):
         cfg = load_config()
@@ -16080,12 +16528,12 @@ class AboutInterface(QWidget):
         if self.timer is not None:
             self.timer.stop()
 
-# ======================== 新手引导（新拟物 + Hello 动画） ========================
-# 说明：本模块仅首次启动时显示，引导完成会写 config["onboarding_completed"]=True
+# 新手引导
+
 
 class _HelloWidget(QWidget):
     """苹果风格 Hello 文字动画：逐字从下方滑入 + 淡入，单色（符合新拟物）"""
-    COLOR = "#5a6b8c"     # 与 _NeuColors.TEXT 一致，柔和蓝灰
+    COLOR = "#5a6b8c"     
     CHARS = ["H", "e", "l", "l", "o"]
 
     def __init__(self, parent=None):
@@ -16154,17 +16602,57 @@ class _HelloWidget(QWidget):
 def _make_round_neu_button(text, size=180, font_size=28):
     """快速创建一个 180×180 的圆形新拟物按钮"""
     btn = _NeuRoundButton(text)
-    # ★ 先设置参数，再 setFixedSize：resizeEvent 会用新参数算 radius
+  
     btn._blur = 8
     btn._distance = 4
     btn._font.setPointSize(font_size)
-    btn.setFixedSize(size, size)   # → radius = (180 - 2*(16+4+4))/2 = 66 ✔ 真圆
+    btn.setFixedSize(size, size)  
     btn._cache = None
     return btn
 
+def _animate_stage_enter(card, buttons=None,
+                         card_duration=450, btn_duration=350, btn_stagger=80):
+    """阶段入场动画"""
+    anims = []
+
+    if card is not None:
+        
+        card.setGraphicsEffect(None)
+        eff = QGraphicsOpacityEffect(card)
+        eff.setOpacity(0.0)         
+        card.setGraphicsEffect(eff)
+        anim = QPropertyAnimation(eff, b"opacity", card)
+        anim.setDuration(card_duration)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.finished.connect(lambda c=card: c.setGraphicsEffect(None))
+        anim.start()
+        card._enter_anim = anim
+        anims.append(anim)
+
+    if buttons:
+        for i, btn in enumerate(buttons):
+            if btn is None:
+                continue
+            btn.setGraphicsEffect(None)
+            b_eff = QGraphicsOpacityEffect(btn)
+            b_eff.setOpacity(0.0)    # ← 同上
+            btn.setGraphicsEffect(b_eff)
+            b_anim = QPropertyAnimation(b_eff, b"opacity", btn)
+            b_anim.setDuration(btn_duration)
+            b_anim.setStartValue(0.0)
+            b_anim.setEndValue(1.0)
+            b_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            b_anim.finished.connect(lambda b=btn: b.setGraphicsEffect(None))
+            QTimer.singleShot(btn_stagger * (i + 1), b_anim.start)
+            btn._enter_anim = b_anim
+            anims.append(b_anim)
+
+    return anims
 
 def _fade_in_widget(widget, duration=600):
-    """让 widget 淡入（不需要时请保留引用，避免动画被 GC）"""
+    """让 widget 淡入"""
     eff = QGraphicsOpacityEffect(widget)
     widget.setGraphicsEffect(eff)
     eff.setOpacity(0.0)
@@ -16189,15 +16677,15 @@ class _HelloStage(QWidget):
         layout.setContentsMargins(0, 20, 0, 20)
         layout.setSpacing(20)
 
-        # 上方弹性 → Hello → 弹性，保证 Hello 永远垂直居中
+        #保证Hello垂直居中
         layout.addStretch(1)
         self.hello_widget = _HelloWidget()
         self.hello_widget.setFixedSize(900, 350)
         layout.addWidget(self.hello_widget, alignment=Qt.AlignmentFlag.AlignCenter)
         layout.addStretch(1)
 
-        # ★ 关键：按钮放在固定高度容器里。
-        #   按钮 setVisible(False) ↔ True 时容器高度不变 → Hello 位置不动。
+        # 按钮放在固定高度容器里
+   
         btn_container = QWidget()
         btn_container.setFixedHeight(200)
         btn_container.setStyleSheet("background:transparent;")
@@ -16250,19 +16738,23 @@ class _ShortcutStage(QWidget):
         yes_btn = _make_round_neu_button("创建", 180, 28)
         yes_btn.clicked.connect(self.on_yes)
         btn_row.addWidget(yes_btn)
+        self.yes_btn = yes_btn
 
         no_btn = _make_round_neu_button("稍后", 180, 28)
         no_btn.clicked.connect(self.on_no)
         btn_row.addWidget(no_btn)
+        self.no_btn = no_btn
 
         layout.addLayout(btn_row)
 
-    def start(self):
-        pass
+    def start(self):                           
+        _animate_stage_enter(self.tip_card, [self.yes_btn, self.no_btn])
+
+    
 
 
 class _ClassStage(QWidget):
-    """配置名单阶段：凸起卡片包文字 + 📂 主按钮 + 稍后配置链接"""
+    """配置名单阶段"""
 
     def __init__(self, on_pick, on_skip):
         super().__init__()
@@ -16303,9 +16795,51 @@ class _ClassStage(QWidget):
         layout.addLayout(btn_row)
 
     def start(self):
-        # 整体淡入由 OnboardingWindow._switch_to 完成
-        pass
+        _animate_stage_enter(self.tip_card, [self.pick_btn, self.skip_btn])
 
+class _SubjectStage(QWidget):
+    """配置考试科目"""
+
+    def __init__(self, on_config, on_skip):
+        super().__init__()
+        self.setStyleSheet("background:transparent;")
+        self.on_config = on_config
+        self.on_skip = on_skip
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 30, 0, 40)
+        layout.setSpacing(20)
+
+        # 上方凸起卡片，说明文字
+        self.tip_card = _NeuTipCard(
+            "是否配置考试科目？\n"
+            "用于成绩单科王、考试加分规则等\n"
+            "（可在设置 - 科目里进行配置与更改）",
+            font_size=14,
+        )
+        self.tip_card.setFixedSize(760, 200)
+
+        layout.addStretch(1)
+        layout.addWidget(self.tip_card, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addStretch(1)
+
+        # 下方配置 / 稍后 两个同尺寸圆形按钮
+        btn_row = QHBoxLayout()
+        btn_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        btn_row.setSpacing(60)
+
+        self.config_btn = _make_round_neu_button("配置", 180, 28)
+        self.config_btn.clicked.connect(self.on_config)
+        btn_row.addWidget(self.config_btn)
+
+        self.skip_btn = _make_round_neu_button("稍后", 180, 28)
+        self.skip_btn.clicked.connect(self.on_skip)
+        btn_row.addWidget(self.skip_btn)
+
+        layout.addLayout(btn_row)
+
+    def start(self):
+        _animate_stage_enter(self.tip_card, [self.config_btn, self.skip_btn])
 
 class _PasswordStage(QWidget):
     def __init__(self, on_yes, on_no):
@@ -16337,19 +16871,21 @@ class _PasswordStage(QWidget):
         yes_btn = _make_round_neu_button("是", 180, 28)
         yes_btn.clicked.connect(self.on_yes)
         btn_row.addWidget(yes_btn)
+        self.yes_btn = yes_btn
 
         no_btn = _make_round_neu_button("否", 180, 28)
         no_btn.clicked.connect(self.on_no)
         btn_row.addWidget(no_btn)
+        self.no_btn = no_btn
 
         layout.addLayout(btn_row)
 
     def start(self):
-        pass
+        _animate_stage_enter(self.tip_card, [self.yes_btn, self.no_btn])
 
 
 class OnboardingWindow(QWidget):
-    """新手引导窗口（1280×720，新拟物风格，苹果 Hello 动画）"""
+    """新手引导窗口"""
 
     def __init__(self, main_window, on_finish=None):
         super().__init__(None)
@@ -16379,12 +16915,14 @@ class OnboardingWindow(QWidget):
         self.hello_stage = _HelloStage(self._on_hello_next)
         self.shortcut_stage = _ShortcutStage(self._on_shortcut_yes, self._on_shortcut_no)
         self.class_stage = _ClassStage(self._on_class_pick, self._on_class_skip)
+        self.subject_stage = _SubjectStage(self._on_subject_config, self._on_subject_skip)
         self.password_stage = _PasswordStage(self._on_password_yes, self._on_password_no)
 
         self.stages = [
             self.hello_stage,
             self.shortcut_stage,
             self.class_stage,
+            self.subject_stage,
             self.password_stage,
         ]
 
@@ -16395,7 +16933,7 @@ class OnboardingWindow(QWidget):
 
         QTimer.singleShot(100, lambda: self._switch_to(0, animate=False))
 
-    # ---------- 阶段切换 ----------
+    # 阶段切换
     def _switch_to(self, index, animate=True):
         if index == self._current_index:
             return
@@ -16403,54 +16941,55 @@ class OnboardingWindow(QWidget):
         old_index = self._current_index
         self._current_index = index
         new_widget = self.stages[index]
-        new_widget.setVisible(True)
-        new_widget.raise_()
 
+        if old_index >= 0 and animate:
+            old_widget = self.stages[old_index]
+            old_eff = QGraphicsOpacityEffect(old_widget)
+            old_widget.setGraphicsEffect(old_eff)
+            old_eff.setOpacity(1.0)
+            out_anim = QPropertyAnimation(old_eff, b"opacity")
+            out_anim.setStartValue(1.0)
+            out_anim.setEndValue(0.0)
+            out_anim.setDuration(450)
+            out_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+            def _on_fade_out_done(w=old_widget):
+                try:
+                    w.setVisible(False)
+                    w.setGraphicsEffect(None)
+                except Exception:
+                    pass
+                self._fade_in_new(new_widget, index)
+
+            out_anim.finished.connect(_on_fade_out_done)
+            out_anim.start()
+            self._active_anims.append(out_anim)
+            return
+            
+
+        
         if old_index >= 0:
             old_widget = self.stages[old_index]
-            if animate:
-                old_eff = QGraphicsOpacityEffect(old_widget)
-                old_widget.setGraphicsEffect(old_eff)
-                old_eff.setOpacity(1.0)
-                out_anim = QPropertyAnimation(old_eff, b"opacity")
-                out_anim.setStartValue(1.0)
-                out_anim.setEndValue(0.0)
-                out_anim.setDuration(300)
-                out_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-                out_anim.finished.connect(
-                    lambda w=old_widget: (w.setVisible(False), w.setGraphicsEffect(None))
-                )
-                out_anim.start()
-                self._active_anims.append(out_anim)
-            else:
-                old_widget.setVisible(False)
-                old_widget.setGraphicsEffect(None)
+            old_widget.setVisible(False)
+            old_widget.setGraphicsEffect(None)
 
-        if animate:
-            new_eff = QGraphicsOpacityEffect(new_widget)
-            new_widget.setGraphicsEffect(new_eff)
-            new_eff.setOpacity(0.0)
-            in_anim = QPropertyAnimation(new_eff, b"opacity")
-            in_anim.setStartValue(0.0)
-            in_anim.setEndValue(1.0)
-            in_anim.setDuration(400)
-            in_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-            in_anim.finished.connect(
-                lambda w=new_widget: w.setGraphicsEffect(None)
-            )
-            in_anim.finished.connect(lambda: self._start_stage(index))
-            in_anim.start()
-            self._active_anims.append(in_anim)
-        else:
-            new_widget.setGraphicsEffect(None)
-            self._start_stage(index)
+        
+        self._fade_in_new(new_widget, index, animate)
+
+    def _fade_in_new(self, new_widget, index, animate=True):
+        """新阶段入场"""
+        
+        new_widget.setGraphicsEffect(None)
+        new_widget.setVisible(True)
+        new_widget.raise_()
+        self._start_stage(index)
 
     def _start_stage(self, index):
         stage = self.stages[index]
         if hasattr(stage, "start"):
             stage.start()
 
-    # ---------- 各阶段回调 ----------
+    # 各阶段回调
     def _on_hello_next(self):
         self._switch_to(1)
 
@@ -16462,18 +17001,18 @@ class OnboardingWindow(QWidget):
         self._switch_to(2)
 
     def _on_class_pick(self):
-        """选择班级名单：成功才进入下一阶段；失败 / 取消都留在当前阶段。"""
+        """选择班级名单"""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "选择班级名单 Excel 文件", "",
             "Excel 文件 (*.xlsx *.xls);;所有文件 (*)"
         )
         if not file_path:
-            # 用户主动取消 → 留在当前阶段（不静默放行）
+            # 用户主动取消留在当前阶段
             return
 
         try:
             if not self.main_window._save_as_class_list(file_path):
-                # 失败：弹 QMessageBox 明确告知，不放行
+             
                 QMessageBox.warning(
                     self, "名单文件不符合要求",
                     "请确认 Excel 中包含「学号」和「姓名」两列。\n\n"
@@ -16494,12 +17033,25 @@ class OnboardingWindow(QWidget):
             )
             return
 
-        # 成功 → 进入密码阶段
+       
         self._switch_to(3)
 
     def _on_class_skip(self):
-        """用户明确点击「稍后配置」→ 直接进入密码阶段。"""
+        """用户点击稍后配置直接进入科目设置"""
         self._switch_to(3)
+
+    def _on_subject_config(self):
+        """打开科目管理弹窗，关闭后进入密码阶段"""
+        try:
+            dlg = SubjectManagerDialog(self)
+            dlg.exec()
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"打开科目设置失败：{e}")
+        self._switch_to(4)
+
+    def _on_subject_skip(self):
+        """跳过后直接进入密码阶段"""
+        self._switch_to(4)
 
     def _on_password_yes(self):
         self._open_password_settings()
@@ -16508,7 +17060,7 @@ class OnboardingWindow(QWidget):
     def _on_password_no(self):
         self._finish()
 
-    # ---------- 密码设置（调用前面的更改密码界面） ----------
+    #密码设置
     def _open_password_settings(self):
         try:
             dlg = _ChangePasswordDialog(self)
@@ -16520,7 +17072,7 @@ class OnboardingWindow(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "错误", f"设置密码失败：{e}")
 
-    # ---------- 桌面快捷方式（仅 Windows） ----------
+    # 桌面快捷方式
     def _create_desktop_shortcut(self):
         import sys
         import os
@@ -16531,7 +17083,7 @@ class OnboardingWindow(QWidget):
             return
 
         try:
-            # 1. 获取桌面路径
+            # 获取桌面路径
             desktop = os.path.join(os.path.expanduser("~"), "Desktop")
             if not os.path.exists(desktop):
                 desktop = os.path.join(os.path.expanduser("~"), "OneDrive", "Desktop")
@@ -16541,12 +17093,12 @@ class OnboardingWindow(QWidget):
 
             target_path = os.path.join(desktop, "PickOS.lnk")
 
-            # ★ 新增：检查是否已经存在（安装包可能已经创建过了）
+            # 检查是否已经存在快捷方式
             if os.path.exists(target_path):
                 show_toast(self, "桌面上已存在 PickOS 快捷方式，无需重复创建", "info")
                 return  # 直接结束，不往下覆盖
 
-            # 2. 动态区分打包与源码环境
+            # 区分打包与源码环境
             if getattr(sys, "frozen", False):
                 exe_path = sys.executable
                 work_dir = os.path.dirname(exe_path)
@@ -16557,7 +17109,7 @@ class OnboardingWindow(QWidget):
                 script_path = os.path.abspath(__file__)
                 arguments = f'"{script_path}"'
 
-            # 3. 使用 win32com 原生创建快捷方式
+            #  使用 win32com 原生创建快捷方式
             try:
                 import win32com.client
             except ImportError:
@@ -16584,7 +17136,7 @@ class OnboardingWindow(QWidget):
             )
 
     def _show_shortcut_success_tip(self):
-        """创建快捷方式成功后的新拟物风格提示框（与修改密码成功弹窗一致）"""
+        """创建快捷方式成功后的新拟物风格提示框"""
         dlg = QDialog(self)
         dlg.setWindowTitle("创建成功")
         dlg.setFixedSize(460, 260)
@@ -16604,7 +17156,7 @@ class OnboardingWindow(QWidget):
 
         lay.addStretch()
 
-        # 与修改密码成功弹窗相同的按钮尺寸和参数
+      
         ok_btn = _NeuButton("确定")
         ok_btn.setFixedSize(220, 100)
         ok_btn._radius = 24.0
@@ -16617,7 +17169,7 @@ class OnboardingWindow(QWidget):
 
         dlg.exec()
 
-    # ---------- 结束引导 ----------
+    # 结束引导
     def _finish(self):
         if self._closing:
             return
@@ -16633,7 +17185,7 @@ class OnboardingWindow(QWidget):
         anim = QPropertyAnimation(eff, b"opacity")
         anim.setStartValue(1.0)
         anim.setEndValue(0.0)
-        anim.setDuration(500)
+        anim.setDuration(800)
         anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         anim.finished.connect(self._do_close)
         anim.start()
@@ -16645,7 +17197,7 @@ class OnboardingWindow(QWidget):
             self._on_finish_callback()
 
     def closeEvent(self, event):
-        # 强制关闭（Alt+F4）也标记完成，避免下次重复引导
+      
         if not self._closing:
             self._closing = True
             cfg = load_config()
@@ -16655,72 +17207,117 @@ class OnboardingWindow(QWidget):
                 self._on_finish_callback()
         super().closeEvent(event)
 
-# ======================== 程序入口 ========================
+# 程序入口
 if __name__ == "__main__":
     import sys
     from PyQt6.QtWidgets import QApplication
 
-    print("🚀 [1] PickOS 进入 main")
-    print(f"📋 Python: {sys.version}")
-    print(f"📋 CWD: {os.getcwd()}")
+    if getattr(sys, "frozen", False):
+        try:
+            os.chdir(os.path.dirname(os.path.abspath(sys.executable)))
+        except Exception as e:
+            print(f"切换工作目录失败（不影响启动）：{e}")
 
-    # 检测打包环境变量，若存在则直接退出，避免弹出 GUI
+    print(f"PickOS 启动，python {sys.version.split()[0]}, cwd={os.getcwd()}")
+
+    
     if os.environ.get("PACKAGING_MODE") == "1":
-        print("检测到 PyInstaller 打包环境，跳过 GUI 启动。")
+        print("PyInstaller 打包环境，直接退出")
         sys.exit(0)
-    # 确保上述 import 已在文件开头，此处只展示核心逻辑
+
     # 创建必要的用户文件夹
     for folder in [USER_DIR, DATA_DIR, EXPORT_DIR, BACKUP_DIR]:
         os.makedirs(folder, exist_ok=True)
     app = QApplication(sys.argv)
-    print("🚀 [2] QApplication 已创建")
+    print("QApplication创建好喽")
 
-    # ===== 启动密码验证（若已开启密码保护） =====
+    
+    single_instance = SingleInstanceManager("PickOS_SingleInstance")
+    if single_instance.try_notify_existing():
+        print("PickOS已在运行")
+        sys.exit(0)
+
+   
+    app.single_instance_manager = single_instance
+
+  
+    MAIN_READY = {"value": False}
+    ACTIVATE_PENDING = {"value": False}
+
+    def _handle_activate_request():
+        """另一个实例请求激活本实例"""
+        global main_window
+        if not MAIN_READY["value"] or main_window is None:
+            ACTIVATE_PENDING["value"] = True
+            return
+        try:
+            if main_window.isMinimized():
+                main_window.showNormal()
+            main_window.show_window()   
+        except Exception as e:
+            print(f"激活主窗口失败：{e}")
+
+  
+    if not single_instance.start_server(_handle_activate_request):
+      
+        if single_instance.try_notify_existing(timeout_ms=1000):
+            print("PickOS已在运行")
+            sys.exit(0)
+        
+        single_instance.stop_server()
+        QMessageBox.critical(
+            None, "PickOS 启动失败",
+            "无法启动单实例服务，可能有另一个 PickOS 正在启动中。\n"
+            "请稍后重试；若问题持续，请重启计算机。"
+        )
+        sys.exit(1)
+
+    # 启动密码验证
     def _check_password_gate():
         cfg = load_config()
         if not cfg.get("password_enabled", False):
-            print("🔓 密码保护未启用")
+            print("密码保护未启用")
             return True
         if not cfg.get("password_hash", ""):
-            print("🔓 密码未设置，跳过验证")
+            print("密码未设置，跳过验证")
             return True
 
-        # ---- 智能解锁：先检测开发者 U 盘，再检测已绑定的普通磁盘 ----
+      
         try:
-            # 1) 开发者 U 盘：不受智能解锁开关影响
+            # 开发者 U 盘不受智能解锁开关影响
             dev = find_developer_usb()
             if dev is not None:
-                print("开发者智能解锁成功：最高管理员权限")
+                print("开发者智能解锁成功，最高管理员权限")  #爽爽爽
                 show_smart_unlock_toast(dev, is_developer=True)
                 return True
 
-            # 2) 普通智能解锁：要求开关已开启且磁盘已绑定
+            # 普通智能解锁要求开关已开启且磁盘已绑定
             bound = find_bound_smart_unlock_device()
             if bound is not None:
-                print("智能解锁成功：检测到已绑定的移动磁盘")
+                print("智能解锁成功，检测到已绑定的移动磁盘")
                 show_smart_unlock_toast(bound, is_developer=False)
                 return True
         except Exception as e:
-            print(f"⚠️ 智能解锁检测失败：{e}")
+            print(f"智能解锁检测失败：{e}")
 
         try:
-            print("🔒 正在弹出密码验证框...")
+            print("正在弹出密码验证框")
             dlg = PasswordPromptDialog()
             ok = dlg.exec() == QDialog.DialogCode.Accepted
-            print(f"🔒 密码验证结果：{ok}")
+            print(f"密码验证结果：{ok}")
             return ok
         except Exception as e:
             import traceback
-            print("❌ 密码验证框异常：")
+            print("密码验证框异常：")
             traceback.print_exc()
             return True
 
 
-    # ===== 应用主题到全局对话框样式 DIALOG_STYLE =====
+    # 应用主题到全局对话框样式
     globals()["DIALOG_STYLE"] = _replace_theme_colors(DIALOG_STYLE)
 
 
-    # ---------- 新增：全局样式（使 QInputDialog 背景为黑色） ----------
+    # 全局样式
     app.setStyleSheet(_replace_theme_colors("""
         QInputDialog {
             background: #16161E;
@@ -16763,7 +17360,7 @@ if __name__ == "__main__":
             background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #42A5F5, stop:1 #1E88E5);
         }
     """))
-    # ---------- 新增结束 ---------
+   
 
     from PyQt6.QtGui import QPalette, QColor
 
@@ -16788,7 +17385,7 @@ if __name__ == "__main__":
     # 调用函数
     apply_theme_palette(app)
 
-    # ---------- 安装弹窗粒子事件过滤器 ----------
+    # 安装弹窗粒子事件过滤器
     particle_filter = ParticleEventFilter(app)
     app.installEventFilter(particle_filter)
     
@@ -16800,7 +17397,7 @@ if __name__ == "__main__":
 
     # 全局变量用于保存窗口引用，避免被垃圾回收
     main_window = None
-    onboarding_window = None   # ← 新增
+    onboarding_window = None  
 
     def fade_in_main_window(win):
         """让主窗口从透明度 0 平滑淡入到 1，同时触发粒子效果"""
@@ -16809,27 +17406,27 @@ if __name__ == "__main__":
 
         def _center_and_resize():
             try:
-                # ★ 用窗口当前所在屏幕（多显示器友好），而不是 primaryScreen
+               
                 scr = win.screen() or QApplication.primaryScreen()
                 if scr is None:
                     return
                 avail = scr.availableGeometry()
 
-                # ★ 目标尺寸不超过屏幕可用尺寸，否则 WM 会强制压缩 / 移出屏幕
+                
                 target_w = min(1280, avail.width())
                 target_h = min(720, avail.height())
                 win.resize(target_w, target_h)
 
-                # ★ 用窗口"实际尺寸"居中（不是常量 1280×720）
+                #用窗口实际尺寸居中
                 x = avail.x() + (avail.width() - win.width()) // 2
                 y = avail.y() + (avail.height() - win.height()) // 2
                 win.move(x, y)
             except Exception as e:
-                print(f"⚠️ 主窗口重新定位失败: {e}")
+                print(f"主窗口重新定位失败: {e}")
 
-        # show 之后延迟一步：让 WM 先完成窗口创建/接管
+        
         QTimer.singleShot(30, _center_and_resize)
-        # 保险起见，稍晚一点再确认一次（部分系统/主题动画会二次调整窗口）
+        # 保险起见，稍晚一点再确认一次
         QTimer.singleShot(120, _center_and_resize)
 
         # 主窗口出现时触发粒子
@@ -16853,16 +17450,16 @@ if __name__ == "__main__":
             main_window.hide()      # 确保不会提前显示
         except Exception as e:
             import traceback
-            print(f"⚠️ 主窗口预加载失败：{e}")
+            print(f"主窗口预加载失败：{e}")
             traceback.print_exc()
             main_window = None
 
     
     def on_boot_finished():
-        """开机动画结束回调：密码验证 → 新手引导（首次）→ 显示主窗口"""
+        """开机动画结束回调：密码验证到新手引导到显示主窗口"""
         global main_window, onboarding_window
 
-        # ---- 主窗口构造 ----
+        # 主窗口构造
         if main_window is None:
             try:
                 main_window = MainWindow()
@@ -16870,13 +17467,13 @@ if __name__ == "__main__":
             except Exception as e:
                 import traceback
                 print("=" * 60)
-                print("❌ 主窗口构造失败，异常堆栈：")
+                print("主窗口构造失败，异常堆栈：")
                 traceback.print_exc()
                 print("=" * 60)
                 QApplication.quit()
                 return
 
-        # ---- 密码验证 ----
+        # 密码验证
         try:
             if not _check_password_gate():
                 QApplication.quit()
@@ -16884,32 +17481,36 @@ if __name__ == "__main__":
         except Exception as e:
             import traceback
             print("=" * 60)
-            print("❌ 密码验证失败，异常堆栈：")
+            print("密码验证失败，异常堆栈：")
             traceback.print_exc()
             print("=" * 60)
-            print("⚠️ 已跳过密码验证，继续启动")
+            print("已跳过密码验证，继续启动")
 
-        # ---- 新手引导 / 直接显示主窗口 ----
+        # 新手引导 / 直接显示主窗口
         cfg = load_config()
-        print(f"📋 启动状态：onboarding_completed = {cfg.get('onboarding_completed', False)}")
+        print(f"启动状态：onboarding_completed = {cfg.get('onboarding_completed', False)}")
 
         def _safe_post_boot():
             try:
                 main_window.start_post_boot_tasks()
             except Exception as e:
                 import traceback
-                print(f"⚠️ 启动后置任务失败：{e}")
+                print(f"启动后置任务失败：{e}")
                 traceback.print_exc()
 
         def _launch_main_window():
-            """主窗口淡入 + 主窗口真正出现后再跑启动后置任务"""
+            """主窗口淡入"""
             fade_in_main_window(main_window)
 
-            # 延迟 450ms 再跑后置任务：
-            #   · 淡入动画 700ms，450ms 时窗口已基本可见（opacity ≈ 0.7~0.9）
-            #   · 避免"窗口还是半透明时，通知已经完全不透明地飘出来"的错位感
-            #   · 后置任务本身有 _post_boot_started 去重，多次调用安全
             QTimer.singleShot(450, _safe_post_boot)
+
+            
+            def _mark_ready():
+                MAIN_READY["value"] = True
+                if ACTIVATE_PENDING["value"]:
+                    ACTIVATE_PENDING["value"] = False
+                    _handle_activate_request()
+            QTimer.singleShot(750, _mark_ready)
 
         if not cfg.get("onboarding_completed", False):
             def _on_onboarding_finish():
@@ -16925,44 +17526,50 @@ if __name__ == "__main__":
                         main_window.refresh_ranking()
                 except Exception:
                     pass
-                # ★ 新手引导完成 → 显示主窗口 → 再跑后置任务
+                # 新手引导完成显示主窗口再跑后置任务
                 _launch_main_window()
 
             try:
-                print("🎬 正在创建新手引导窗口...")
+                print("正在创建新手引导窗口")
                 onboarding_window = OnboardingWindow(
                     main_window, on_finish=_on_onboarding_finish
                 )
                 onboarding_window.show()
                 onboarding_window.raise_()
                 onboarding_window.activateWindow()
-                print(f"✅ 新手引导窗口已显示，isVisible={onboarding_window.isVisible()}")
+                print(f"新手引导窗口已显示，isVisible={onboarding_window.isVisible()}")
             except Exception as e:
                 import traceback
                 print("=" * 60)
-                print("❌ 新手引导窗口失败，异常堆栈：")
+                print("新手引导窗口失败，异常堆栈：")
                 traceback.print_exc()
                 print("=" * 60)
-                print("⚠️ 直接进入主界面")
+                print("直接进入主界面")
                 onboarding_window = None
-                # 兜底：标记引导已完成，避免下次再卡在这
+                # 标记引导已完成，避免下次再卡在这
                 cfg["onboarding_completed"] = True
                 save_config(cfg)
-                # ★ 引导失败兜底 → 显示主窗口 → 再跑后置任务
+                # 引导失败显示主窗再跑后置任务
                 _launch_main_window()
         else:
-            print("🚀 常规启动，直接显示主窗口")
-            # ★ 常规启动 → 显示主窗口 → 再跑后置任务
+            print("常规启动，直接显示主窗口")
+        
             _launch_main_window()
 
-    # ======================== 启动流程 ========================
+    #启动流程
     if show_boot:
-        print("🎬 [3] 即将创建 BootSplash")
+        print("即将创建BootSplash")
         splash = BootSplash(on_boot_finished, enable_animation=True)
-        print(f"🎬 [4] BootSplash 已创建，isVisible={splash.isVisible()}, geometry={splash.geometry()}")
+        print(f"BootSplash已创建，isVisible={splash.isVisible()}, geometry={splash.geometry()}")
         QTimer.singleShot(50, preload_main_window_silently)
     else:
-        print("🎬 [3] 无开机动画，直接进入 on_boot_finished")
+        print("无开机动画直接进入 on_boot_finished")
         on_boot_finished()
 
     sys.exit(app.exec())
+
+#当你看到这一行的时候，说明你已经看到这一行了
+#那会有什么奖励呢
+#奖励你再看一遍吧
+#勤劳的小蜜蜂
+#今天也要加油呀
