@@ -25,6 +25,7 @@ import base64
 import hashlib
 from PyQt6.QtGui import QIcon, QPixmap
 import os
+import queue
 import json
 import ssl
 import certifi
@@ -77,7 +78,7 @@ USER_DIR = "user"                     # 用户数据根目录
 DATA_DIR = os.path.join(USER_DIR, "data")       # 数据文件夹
 EXPORT_DIR = os.path.join(USER_DIR, "exports")  # 导出文件夹
 BACKUP_DIR = os.path.join(USER_DIR, "backups")  # 备份文件夹
-# 成绩导入数据持久化文件（多考试管理）
+# 成绩导入数据持久化文件
 CURRENT_SCORES_FILE = os.path.join(DATA_DIR, "current_scores.csv")   # 本次考试
 PREVIOUS_SCORES_FILE = os.path.join(DATA_DIR, "previous_scores.csv") # 上次考试
 
@@ -88,7 +89,106 @@ CLASS_LIST_FILE = os.path.join(DATA_DIR, "班级名单.xlsx")
 DATA_CSV = os.path.join(DATA_DIR, "班级积分记录.csv")
 INSTALL_TIME_STR = "2026-05-01 18:00:00"
 INSTALL_TIMESTAMP = time.mktime(time.strptime(INSTALL_TIME_STR, "%Y-%m-%d %H:%M:%S"))
-SYSTEM_VERSION = "v6.4.1.125"
+
+
+#默认配置
+DEFAULT_SUBJECTS = [
+    {"name": "语文", "use_assign": False},
+    {"name": "数学", "use_assign": False},
+    {"name": "英语", "use_assign": False},
+    {"name": "物理", "use_assign": False},
+    {"name": "化学", "use_assign": True},
+    {"name": "生物", "use_assign": True},
+]
+
+
+def _make_default_config():
+    """返回一份全新的默认配置"""
+    return {
+        "student_file": DEFAULT_STUDENT_EXCEL,
+        "template_file": "",
+        "last_export_month": "",
+        "default_discount": 100,
+        "default_category": "日常",
+        "show_boot_animation": True,
+        "install_time": time.time(),
+        "backup_dir": "backups",
+        "max_backups": 10,
+        "last_backup_date": "",
+        "custom_reasons": [
+            {"name": "迟到", "type": "-", "score": 2},
+            {"name": "早退", "type": "-", "score": 2},
+            {"name": "卫生", "type": "-", "score": 1},
+            {"name": "纪律", "type": "-", "score": 1},
+            {"name": "作业", "type": "-", "score": 2},
+            {"name": "课堂表现", "type": "+", "score": 2},
+        ],
+        "last_input_category": "日常",
+        "last_input_reason": "",
+        "last_input_discount": "100",
+        "fix_params_serial": False,
+        "enable_reason_number_shortcut": True,
+        "countdown_events": [],
+        "selected_countdown_index": -1,
+        "overview_top_n": 5,
+        "overview_rank_by": "赋分班名",
+        "total_records_count": 0,
+        "total_experience": 0,
+        "today_experience": 0,
+        "last_experience_date": "",
+        "sign_in_streak": 0,
+        "last_sign_in_date": "",
+        "online_seconds_today": 0,
+        "last_online_update": 0.0,
+        "last_device_day": "",
+        "achievements": {},
+        "device_total_days_recorded": 0,
+        "import_count": 0,
+        "export_count": 0,
+        "backup_count": 0,
+        "recent_records_limit": 100,
+        "auto_check_update": True,
+        "enable_progress_animation": True,
+        "enable_particle_effect": True,
+        "enable_click_particle_effect": True,
+        "enable_drag_particle_effect": True,
+        "enable_scroll_particle_effect": True,
+        "enable_nav_animation": True,
+        "theme_mode": "light",
+        "theme_bg": "#16161E",
+        "theme_fg": "#E0E0E0",
+        "export_keep_counts": {
+            "班级积分月度汇总": 5,
+            "成绩总览对比": 5,
+            "其它": 5,
+        },
+        "backup_keep_counts": {
+            "备份-积分记录": 5,
+            "名单备份": 5,
+            "积分记录": 5,
+            "其它": 5,
+        },
+       
+        "custom_subjects": [dict(s) for s in DEFAULT_SUBJECTS],
+        "password_enabled": False,
+        "password_hash": "",
+        "anti_peek_enabled": False,
+        "smart_unlock_enabled": False,
+        "smart_unlock_device": [],
+        "onboarding_completed": False,
+    }
+
+#系统元信息
+
+SYSTEM_NAME      = "PickOS 班级管理系统"
+SYSTEM_VERSION   = "v6.5.0.100"          
+SYSTEM_AUTHOR    = "wuweijia-star"       
+SYSTEM_CONTACT   = "2892065430@qq.com"   
+SYSTEM_LICENSE   = "GPLv3"               
+SYSTEM_YEAR      = "2026"                
+CURRENT_VERSION  = SYSTEM_VERSION
+COPYRIGHT_UI     = f"Copyright © {SYSTEM_YEAR} {SYSTEM_AUTHOR}  ·  {SYSTEM_LICENSE}"
+COPYRIGHT_C      = f"Copyright (C) {SYSTEM_YEAR} {SYSTEM_AUTHOR}  ·  {SYSTEM_LICENSE}"
 
 DIALOG_STYLE = """
     QDialog {
@@ -247,7 +347,6 @@ DIALOG_STYLE = """
 """
 
 # 自动更新系统
-CURRENT_VERSION = "v6.4.1.125"
 GITHUB_API_URL = "https://api.github.com/repos/wuweijia-star/PickOS/releases/latest"
 
 class UpdateManager:
@@ -1139,7 +1238,7 @@ def calculate_level_by_exp(total_exp):
     return min(level, MAX_LEVEL)
 
 def get_level_progress(total_exp=None):
-    """获取当前等级进度 (当前经验, 升级所需经验, 进度百分比)"""
+    """获取当前等级进度"""
     if total_exp is None:
         cfg = load_config()
         total_exp = cfg.get("total_experience", 0)
@@ -1328,89 +1427,7 @@ def get_main_window():
     return getattr(QApplication.instance(), 'main_window', None)
 #配置文件管理
 def load_config():
-    default = {
-        "student_file": DEFAULT_STUDENT_EXCEL,
-        "template_file": "",
-        "last_export_month": "",
-        "default_discount": 100,
-        "default_category": "日常",
-        "show_boot_animation": True,
-        "install_time": time.time(),
-        "backup_dir": "backups",
-        "max_backups": 10,
-        "last_backup_date": "",
-        "custom_reasons": [
-            {"name": "迟到", "type": "-", "score": 2},
-            {"name": "早退", "type": "-", "score": 2},
-            {"name": "卫生", "type": "-", "score": 1},
-            {"name": "纪律", "type": "-", "score": 1},
-            {"name": "作业", "type": "-", "score": 2},
-            {"name": "课堂表现", "type": "+", "score": 2},
-        ],
-        "last_input_category": "日常",
-        "last_input_reason": "",
-        "last_input_discount": "100",
-        "fix_params_serial": False,
-        "enable_reason_number_shortcut": True,
-        "countdown_events": [],          # 倒计时事件列表
-        "selected_countdown_index": -1 ,  # -1 表示无选中
-        "overview_top_n": 5,
-        "overview_rank_by": "赋分班名",
-        "total_records_count": 0,
-        "total_experience": 0,              # 累计总经验用于计算等级
-        "today_experience": 0,              # 今日已获得经验
-        "last_experience_date": "",         # 上次获得经验的日期用于重置每日计数
-        "sign_in_streak": 0,                # 连续签到天数
-        "last_sign_in_date": "",            # 上次签到日期
-        "online_seconds_today": 0,          # 今日在线秒数用于在线计时经验
-        "last_online_update": 0.0,          # 上次更新在线时间的时间戳
-        "last_device_day": "",              # 上次领取设备运行经验的天数
-        "achievements": {},                 # 成就领取记录
-        "device_total_days_recorded": 0,
-        "import_count": 0,          # 导入成绩次数
-        "export_count": 0,          # 导出表格次数
-        "backup_count": 0,
-        "recent_records_limit": 100,   # 最近录入记录显示条数
-        "enable_progress_animation": True,
-        "enable_particle_effect": True,      # 弹窗关闭粒子效果
-        "enable_click_particle_effect": True,   # 鼠标点击粒子
-        "enable_drag_particle_effect": True,   # 拖动拖尾粒子
-        "enable_scroll_particle_effect": True, # 鼠标滚动粒子
-        "enable_nav_animation": True,          #导航栏切换动画
-        # 主题 
-        "theme_mode": "light",          # dark / light / custom
-        "theme_bg": "#16161E",         # 自定义模式下的窗口颜色
-        "theme_fg": "#E0E0E0",         # 自定义模式下的文字颜色
-        # 按类型分别保留条数
-        "export_keep_counts": {
-            "班级积分月度汇总": 5,
-            "成绩总览对比": 5,
-            "其它": 5,
-        },
-        "backup_keep_counts": {
-            "备份-积分记录": 5,
-            "名单备份": 5,
-            "积分记录": 5,
-            "其它": 5,
-        },
-        #自定义科目
-        "custom_subjects": [
-            {"name": "语文", "use_assign": False},
-            {"name": "数学", "use_assign": False},
-            {"name": "英语", "use_assign": False},
-            {"name": "物理", "use_assign": False},
-            {"name": "化学", "use_assign": True},
-            {"name": "生物", "use_assign": True},
-        ],
-        # 密码保护
-        "password_enabled": False,     
-        "password_hash": "",           
-        "anti_peek_enabled": False,    
-        # 智能解锁
-        "smart_unlock_enabled": False,
-        "smart_unlock_device": [],          
-        "onboarding_completed": False,   # 是否已完成新手引导
-    }
+    default = _make_default_config()
     if os.path.exists(CONFIG_JSON):
         try:
             with open(CONFIG_JSON, "r", encoding="utf-8") as f:
@@ -1460,14 +1477,7 @@ def save_config(cfg):
         with open(CONFIG_JSON, "w", encoding="utf-8") as f:
             json.dump(cfg, f, ensure_ascii=False, indent=2)
 
-DEFAULT_SUBJECTS = [
-    {"name": "语文", "use_assign": False},
-    {"name": "数学", "use_assign": False},
-    {"name": "英语", "use_assign": False},
-    {"name": "物理", "use_assign": False},
-    {"name": "化学", "use_assign": True},
-    {"name": "生物", "use_assign": True},
-]
+
 
 
 def get_custom_subjects():
@@ -2908,8 +2918,6 @@ from PyQt6.QtWidgets import (
 )
 
 
-SYSTEM_VERSION = "v6.4.1.125"
-
 
 
 class AnimatedLabel(QLabel):
@@ -3022,7 +3030,7 @@ class BootSplash(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addStretch(1)
 
-        credit_label = QLabel("Copyright © 2026 wuweijia-star  ·  GPLv3")
+        credit_label = QLabel(COPYRIGHT_UI)
         credit_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         credit_label.setStyleSheet(
             "color: white; "
@@ -4729,7 +4737,7 @@ class MainWindow(FluentWindow):
         setTheme(get_qfluent_theme(), save=True)
         setThemeColor("#64B5F6")
     
-        self.setWindowTitle("PickOS 班级管理系统")
+        self.setWindowTitle(SYSTEM_NAME)
         self.resize(1280, 720)
 
         
@@ -5236,16 +5244,16 @@ class MainWindow(FluentWindow):
         QTimer.singleShot(5000, self._silent_check_update)
 
     def _silent_check_update(self):
-        """启动 5 秒后静默检查更新（后台线程，不阻塞 UI）"""
+        """启动5秒后静默检查更新"""
+       
+        try:
+            if not load_config().get("auto_check_update", True):
+                print("[静默更新] 已在设置中关闭自动检查，跳过")
+                return
+        except Exception:
+            pass
+
         is_frozen = getattr(sys, "frozen", False)
-        
-        if not is_frozen:
-            try:
-                if load_config().get("dev_skip_silent_update", False):
-                    print("[静默更新] 源码模式，跳过")
-                    return
-            except Exception:
-                pass
 
         def check_thread():
             try:
@@ -5327,11 +5335,11 @@ class MainWindow(FluentWindow):
         layout = self.titleBar.layout()
         if layout is None:
             return
-        # 查找标题标签（文本为 "PickOS 班级管理系统"）
+        # 查找标题标签
         title_label = None
         for i in range(layout.count()):
             widget = layout.itemAt(i).widget()
-            if isinstance(widget, QLabel) and widget.text() == "PickOS 班级管理系统":
+            if isinstance(widget, QLabel) and widget.text() == SYSTEM_NAME:
                 title_label = widget
                 break
         if title_label is None:
@@ -5361,7 +5369,7 @@ class MainWindow(FluentWindow):
         if hasattr(self, 'level_label'):
             self.level_label.setText(f"Lv.{level}")
             self.level_label.adjustSize()
-        self.setWindowTitle("PickOS 班级管理系统")
+        self.setWindowTitle(SYSTEM_NAME)
 
     def _init_online_timer(self):
         """初始化在线计时器（每30秒检查一次）"""
@@ -5853,7 +5861,7 @@ class MainWindow(FluentWindow):
             icon = QIcon.fromTheme("application-exit")
         self.tray_icon = QSystemTrayIcon(self)
         self.tray_icon.setIcon(icon)
-        self.tray_icon.setToolTip("PickOS 班级管理系统")
+        self.tray_icon.setToolTip(SYSTEM_NAME)
         tray_menu = QMenu()
         show_action = tray_menu.addAction("显示主窗口")
         show_action.triggered.connect(self.show_window)
@@ -7409,7 +7417,7 @@ class HomeInterface(QWidget):
         self.version_label = BodyLabel(f"版本：{SYSTEM_VERSION}")
         self.version_label.setStyleSheet(f"color: {_c['fg']}; font-size: 15px;")
         content.addWidget(self.version_label)
-        copyright_label = BodyLabel("Copyright © 2026 wuweijia-star  ·  GPLv3")
+        copyright_label = BodyLabel(COPYRIGHT_UI)
         copyright_label.setStyleSheet(f"color: {_c['fg_dim']}; font-size: 16px;")
         content.addWidget(copyright_label)
         layout.addLayout(content)
@@ -13845,6 +13853,17 @@ class SettingsInterface(QWidget):
         help_group = QGroupBox("📖 帮助")
         help_layout = QVBoxLayout(help_group)
 
+        # 自动检查更新
+        auto_row = QHBoxLayout()
+        auto_row.addWidget(QLabel("自动检查更新："))
+        self.auto_update_switch = SwitchButton(self)
+        self.auto_update_switch.setChecked(load_config().get("auto_check_update", True))
+        self.auto_update_switch.checkedChanged.connect(self.toggle_auto_update)
+        auto_row.addWidget(self.auto_update_switch)
+        auto_row.addWidget(QLabel("（启动后自动检查新版本）"))
+        auto_row.addStretch()
+        help_layout.addLayout(auto_row)
+
         # 检查更新
         update_row = QHBoxLayout()
         update_row.addWidget(QLabel("版本更新："))
@@ -14049,6 +14068,17 @@ class SettingsInterface(QWidget):
         # 通知录入页面更新配置
         self.app.refresh_input_shortcut()
 
+    def toggle_auto_update(self):
+        checked = self.auto_update_switch.isChecked()
+        cfg = load_config()
+        cfg["auto_check_update"] = checked
+        save_config(cfg)
+        show_toast(
+            self,
+            "已开启自动检查更新" if checked else "已关闭自动检查更新，可在需要时手动检查",
+            "success",
+        )
+
     def on_record_limit_changed(self, value):
         cfg = load_config()
         cfg["recent_records_limit"] = value
@@ -14124,89 +14154,7 @@ class SettingsInterface(QWidget):
         os.makedirs(BACKUP_DIR, exist_ok=True)
 
         # 生成默认配置
-        default_cfg = {
-            "student_file": DEFAULT_STUDENT_EXCEL,
-            "template_file": "",
-            "last_export_month": "",
-            "default_discount": 100,
-            "default_category": "日常",
-            "show_boot_animation": True,
-            "install_time": time.time(),
-            "backup_dir": "backups",
-            "max_backups": 10,
-            "last_backup_date": "",
-            "custom_reasons": [
-                {"name": "迟到", "type": "-", "score": 2},
-                {"name": "早退", "type": "-", "score": 2},
-                {"name": "卫生", "type": "-", "score": 1},
-                {"name": "纪律", "type": "-", "score": 1},
-                {"name": "作业", "type": "-", "score": 2},
-                {"name": "课堂表现", "type": "+", "score": 2},
-            ],
-            "last_input_category": "日常",
-            "last_input_reason": "",
-            "last_input_discount": "100",
-            "fix_params_serial": False,
-            "enable_reason_number_shortcut": True,
-            "countdown_events": [],
-            "selected_countdown_index": -1,
-            "overview_top_n": 5,
-            "overview_rank_by": "赋分班名",
-            "total_records_count": 0,
-            "total_experience": 0,
-            "today_experience": 0,
-            "last_experience_date": "",
-            "sign_in_streak": 0,
-            "last_sign_in_date": "",
-            "online_seconds_today": 0,
-            "last_online_update": 0.0,
-            "last_device_day": "",
-            "achievements": {},
-            "device_total_days_recorded": 0,
-            "import_count": 0,
-            "export_count": 0,
-            "backup_count": 0,
-            "recent_records_limit": 100,   # 最近录入记录显示条数
-            "enable_progress_animation": True,
-            "enable_particle_effect": True,      # 弹窗关闭粒子效果
-            "enable_click_particle_effect": True,   # 鼠标点击粒子
-            "enable_drag_particle_effect": True,   # 拖动拖尾粒子
-            "enable_scroll_particle_effect": True, # 鼠标滚动粒子
-            "enable_nav_animation": True,          # 导航栏切换动画
-            #  主题 
-            "theme_mode": "light",          # dark / light / custom
-            "theme_bg": "#16161E",         # 窗口颜色
-            "theme_fg": "#E0E0E0",         # 文字颜色
-            # 按类型分别保留条数
-            "export_keep_counts": {
-                "班级积分月度汇总": 5,
-                "成绩总览对比": 5,
-                "其它": 5,
-            },
-            "backup_keep_counts": {
-                "备份-积分记录": 5,
-                "名单备份": 5,
-                "积分记录": 5,
-                "其它": 5,
-            },
-        # 自定义科目
-        "custom_subjects": [
-            {"name": "语文", "use_assign": False},
-            {"name": "数学", "use_assign": False},
-            {"name": "英语", "use_assign": False},
-            {"name": "物理", "use_assign": False},
-            {"name": "化学", "use_assign": True},
-            {"name": "生物", "use_assign": True},
-        ],
-        #密码保护
-        "password_enabled": False,     
-        "password_hash": "",          
-        "anti_peek_enabled": False,    
-        #  智能解锁
-        "smart_unlock_enabled": False,
-        "smart_unlock_device": [],        
-        "onboarding_completed": False,   
-        }
+        default_cfg = _make_default_config()
         with open(CONFIG_JSON, "w", encoding="utf-8") as f:
             json.dump(default_cfg, f, ensure_ascii=False, indent=2)
 
@@ -14385,12 +14333,12 @@ class SettingsInterface(QWidget):
     
 
 #使用指南对话框
-USER_GUIDE_TEXT = """===============================
-PickOS 班级管理系统使用指南
+USER_GUIDE_TEXT = f"""===============================
+{SYSTEM_NAME}使用指南
 ===============================
-版本：v6.4.1.125
+版本：{SYSTEM_VERSION}
 适用平台：Windows / macOS / Linux（正在努力适配HarmonyOS，敬请期待...）
-联系创作者：2892065430@qq.com
+联系创作者：{SYSTEM_CONTACT}
 
 【目录】
 1. 系统概览与设置入口
@@ -14874,15 +14822,14 @@ Q16：圆环的每一段代表什么？
 ─────────────────────────────────
 十六、彩蛋
 ─────────────────────────────────
-在【关于页面】快速点击版本号 5 次，触发满屏爱心动画 💖
+在【关于页面】快速点击版本号 5 次，触发满屏爱心动画
 
 ===============================
 感谢您的使用！
 PickOS
 有你更出色
-Copyright © 2026 wuweijia-star  ·  GPLv3
-===============================
-"""
+{COPYRIGHT_UI}
+==============================="""
 
 
 class UserGuideDialog(QDialog):
@@ -16371,94 +16318,712 @@ class ListManagerInterface(QWidget):
 
 # 关于页面
 
+EULA_URL = "https://raw.githubusercontent.com/wuweijia-star/PickOS/main/EULA.md"
+PRIVACY_URL = "https://raw.githubusercontent.com/wuweijia-star/PickOS/main/PRIVACY.md"
+LICENSE_URL = "https://raw.githubusercontent.com/wuweijia-star/PickOS/main/LICENSE"
+
+
+def _get_major_version():
+    """'v6.5.0.100' → '6'"""
+    v = SYSTEM_VERSION
+    if v.lower().startswith("v"):
+        v = v[1:]
+    return v.split(".")[0]
+
+
+
+_LEGAL_MIRROR_PREFIXES = [
+    "https://ghfast.top/",
+    "https://gh-proxy.com/",
+    "https://ghproxy.net/",
+    "https://ghproxy.homeboyc.cn/",
+]
+
+def _legal_url_candidates(url):
+    """生成候选"""
+    if "raw.githubusercontent.com" not in (url or ""):
+        return [url]
+
+    m = re.match(
+        r"https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/([^/]+)/(.+)",
+        url,
+    )
+    if not m:
+        return [url]
+    owner, repo, branch, path = m.groups()
+
+    jsd = f"gh/{owner}/{repo}@{branch}/{path}"
+    return [
+        f"https://fastly.jsdelivr.net/{jsd}",
+        f"https://gcore.jsdelivr.net/{jsd}",
+        f"https://cdn.jsdelivr.net/{jsd}",
+        f"https://raw.gitmirror.com/{owner}/{repo}/{branch}/{path}",
+        f"https://ghproxy.net/{url}",
+        f"https://ghfast.top/{url}",
+        f"https://gh-proxy.com/{url}",
+        url,
+    ]
+
+#法律文档，还使用缓存吧，之前太慢了
+
+_LEGAL_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".pickos", "legal_cache")
+
+
+def _legal_cache_file(url):
+    h = hashlib.md5((url or "").encode("utf-8")).hexdigest()[:16]
+    return os.path.join(_LEGAL_CACHE_DIR, h + ".md")
+
+
+def _legal_cache_read(url):
+    try:
+        with open(_legal_cache_file(url), "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception:
+        return None
+
+
+def _legal_cache_write(url, text):
+    if not text:
+        return
+    try:
+        os.makedirs(_LEGAL_CACHE_DIR, exist_ok=True)
+        tmp = _legal_cache_file(url) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, _legal_cache_file(url))
+    except Exception as e:
+        print(f"[法律文档] 写缓存失败：{e}")
+
+
+def _fetch_legal_url(try_url, timeout=4.0):
+    """请求单个地址"""
+    def _do(verify):
+        ctx = (
+            ssl.create_default_context(cafile=certifi.where())
+            if verify
+            else ssl._create_unverified_context()
+        )
+        req = urllib.request.Request(
+            try_url, headers={"User-Agent": "PickOS-About"}
+        )
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+
+    try:
+        text = _do(True)
+    except Exception as e:
+        msg = str(e)
+        if "SSL" in msg or "CERTIFICATE" in msg.upper():
+            print(f"[法律文档] SSL 失败，降级重试：{try_url} ({e})")
+            try:
+                text = _do(False)
+            except Exception as e2:
+                print(f"[法律文档] 失败：{try_url} ({e2})")
+                return None
+        else:
+            print(f"[法律文档] 失败：{try_url} ({e})")
+            return None
+
+    head = text.lstrip()[:20].lower()
+    if head.startswith("<!doctype") or head.startswith("<html"):
+        print(f"[法律文档] 返回 HTML，跳过：{try_url}")
+        return None
+    return text
+
+
+def _fetch_legal_best(url, timeout_total=6.0):
+    """并发请求所有候选镜像，谁先成功用谁，不然延迟根本顶不住，呜呜呜~"""
+    candidates = _legal_url_candidates(url)
+    if not candidates:
+        return None
+
+    q = queue.Queue()
+    stop = threading.Event()
+
+    def worker(u):
+        if stop.is_set():
+            q.put((u, None))
+            return
+        q.put((u, _fetch_legal_url(u)))
+
+    for u in candidates:
+        threading.Thread(target=worker, args=(u,), daemon=True).start()
+
+    deadline = time.time() + timeout_total
+    found = None
+    for _ in range(len(candidates)):
+        remain = deadline - time.time()
+        if remain <= 0:
+            break
+        try:
+            u, text = q.get(timeout=remain)
+        except queue.Empty:
+            break
+        if text:
+            found = text
+            stop.set()
+            print(f"[法律文档] 竞速胜出：{u}")
+            break
+    stop.set()
+    return found
+
+
+def prefetch_legal_documents():
+    """后台预取三个法律文档"""
+    for url in (EULA_URL, PRIVACY_URL, LICENSE_URL):
+        if _legal_cache_read(url):
+            continue
+        text = _fetch_legal_best(url)
+        if text:
+            _legal_cache_write(url, text)
+
+#法律文档对话框
+class LegalDocumentDialog(QDialog):
+    """从GitHub加载并展示法律文档"""
+
+    _content_loaded = pyqtSignal(str)
+
+    def __init__(self, parent, title, url, fallback_text=""):
+        super().__init__(parent)
+        _c = get_theme_colors()
+        self.setWindowTitle(title)
+        self.resize(950, 720)
+        self.setStyleSheet(DIALOG_STYLE)
+
+        screen = QApplication.primaryScreen().availableGeometry()
+        self.move(screen.center() - self.rect().center())
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        header = QHBoxLayout()
+        title_label = QLabel(title)
+        title_label.setStyleSheet(
+            f"font-size: 20px; font-weight: bold; color: {_c['fg']};"
+        )
+        header.addWidget(title_label)
+        header.addStretch()
+
+        web_url = url.replace("raw.githubusercontent.com", "github.com") \
+                     .replace("/main/", "/blob/main/")
+        online_btn = QPushButton("🌐 在 GitHub 查看")
+        online_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(web_url)))
+        header.addWidget(online_btn)
+        layout.addLayout(header)
+
+        self.browser = QTextBrowser()
+        self.browser.setOpenExternalLinks(True)
+        self.browser.setStyleSheet(f"""
+            QTextBrowser {{
+                background: {_c['bg_alt']};
+                border: 1px solid {_c['border']};
+                border-radius: 10px;
+                color: {_c['fg']};
+                padding: 16px;
+                font-family: "Microsoft YaHei", "Consolas", monospace;
+                font-size: 14px;
+                selection-background-color: #64B5F6;
+                selection-color: white;
+            }}
+        """)
+        self.browser.setPlainText("正在从 GitHub 加载，请稍候...")
+        layout.addWidget(self.browser)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(self.accept)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+                
+        self._content_loaded.connect(self._on_loaded)
+        self._current_content = None
+
+        cached = _legal_cache_read(url)
+        if cached:
+            print(f"[法律文档] 命中缓存：{title}")
+            self._on_loaded(cached)
+
+        threading.Thread(
+            target=self._load_content,
+            args=(url, fallback_text, bool(cached)),
+            daemon=True,
+        ).start()
+
+    def _load_content(self, url, fallback, has_cache):
+        """后台线程"""
+        text = _fetch_legal_best(url)
+
+        if text:
+            _legal_cache_write(url, text)
+            self._content_loaded.emit(text)
+            return
+
+        if has_cache:
+            print(f"[法律文档] 刷新失败，保留缓存：{url}")
+            return
+
+        self._content_loaded.emit(
+            fallback
+            or (
+                "文档加载失败，请检查网络后重试\n\n"
+                f"在线地址：\n{url}\n\n"
+                "你也可以直接访问GitHub仓库查看该文件"
+            )
+        )
+
+    def _on_loaded(self, content):
+        """主线程槽函数"""
+        if content == self._current_content:
+            return
+        self._current_content = content
+        try:
+            self.browser.setMarkdown(content)
+        except Exception:
+            self.browser.setPlainText(content)
+        try:
+            self.browser.verticalScrollBar().setValue(0)
+        except Exception:
+            pass
+
+
+#关于页面
 class AboutInterface(QWidget):
+
+    _check_update_result = pyqtSignal(bool, str, str, str, str)  
+    _changelog_result    = pyqtSignal(str, str, str)            
+
     def __init__(self, parent):
         super().__init__(parent)
-        _c = get_theme_colors()                 
         self.app = parent
         self.setObjectName("aboutInterface")
+
         self.click_count = 0
         self.last_click_time = time.time()
         self._restore_timer = None
 
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(40, 40, 40, 40)
-        main_layout.setSpacing(15)
-        main_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.version_label = None
+        self.default_text_color = None
+        self.device_time_label = None
 
-        title_label = QLabel("📖 关于本系统", self)
-        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        title_label.setStyleSheet(
-            f"font-family: 'Segoe UI'; font-size: 32px; "
-            f"font-weight: bold; color: {_c['fg']};"
-        )
-        main_layout.addWidget(title_label, alignment=Qt.AlignmentFlag.AlignHCenter)
+        # 先连信号
+        self._check_update_result.connect(self._apply_check_update_result)
+        self._changelog_result.connect(self._apply_changelog_result)
 
-        info_frame = QWidget(self)
-        info_layout = QVBoxLayout(info_frame)
-        info_layout.setContentsMargins(0, 0, 0, 0)
-        info_layout.setSpacing(4)
-
-       
-        def add_line(text, font_size=24, color=None, bold=False, clickable=False):
-            if color is None:
-                color = _c["fg"]
-            label = QLabel(text, info_frame)
-            label.setAlignment(Qt.AlignmentFlag.AlignLeft)
-            weight = "bold" if bold else "normal"
-            label.setStyleSheet(
-                f"font-family: 'Microsoft YaHei'; font-size: {font_size}px; "
-                f"font-weight: {weight}; color: {color};"
-            )
-            if clickable:
-                label.setCursor(Qt.CursorShape.PointingHandCursor)
-            info_layout.addWidget(label)
-            return label
-
-        def add_empty_line(height=14):
-            empty = QLabel("", info_frame)
-            empty.setFixedHeight(height)
-            info_layout.addWidget(empty)
-
-        add_line("【系统名称】：PickOS 班级管理系统")
-        add_empty_line(14)
-
-        self.version_label = add_line(
-            f"【版本】：{SYSTEM_VERSION}",
-            color=_c["fg_bright"],
-            bold=True,
-            clickable=True
-        )
-        self.version_label.mousePressEvent = self.on_version_click
-        self.default_text_color = _c["fg_bright"]      
-
-        add_empty_line(14)
-        add_line("【系统状态】：运行中")
-        add_empty_line(14)
-        add_line("Copyright © 2026 wuweijia-star  ·  GPLv3")
-        add_empty_line(14)
-        add_line("                            中国制造")
-        add_line("                      MADE IN CHINA")
-
-        main_layout.addWidget(info_frame, alignment=Qt.AlignmentFlag.AlignHCenter)
-
-        self.time_label = QLabel("", self)
-        self.time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.time_label.setStyleSheet(
-            "font-family: 'Microsoft YaHei'; font-size: 22px; color: #4A90E2;"
-        )
-        main_layout.addWidget(self.time_label, alignment=Qt.AlignmentFlag.AlignHCenter)
-
-        back_btn = PushButton("🔙 返回", self)
-        back_btn.clicked.connect(lambda: self.app.switchTo(self.app.homeInterface))
-        main_layout.addWidget(back_btn, alignment=Qt.AlignmentFlag.AlignHCenter)
+        self._build_ui()
 
         self.update_time()
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_time)
         self.timer.start(1000)
         self.destroyed.connect(self.on_destroy)
+
+              
+        self._prefetch_timer = QTimer(self)
+        self._prefetch_timer.setSingleShot(True)
+        self._prefetch_timer.timeout.connect(
+            lambda: threading.Thread(
+                target=prefetch_legal_documents, daemon=True
+            ).start()
+        )
+        self._prefetch_timer.start(3000)
+
+    #通用按钮样式
+    @staticmethod
+    def _themed_button_style():
+        _c = get_theme_colors()
+        return f"""
+            QPushButton {{
+                background: rgba(100, 181, 246, 0.20);
+                color: {_c['fg_bright']};
+                border: 1px solid rgba(100, 181, 246, 0.35);
+                border-radius: 10px;
+                padding: 10px 24px;
+                font-size: 15px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: rgba(100, 181, 246, 0.34);
+                color: {_c['fg_bright']};
+            }}
+            QPushButton:pressed {{
+                background: rgba(100, 181, 246, 0.48);
+            }}
+        """
+
+    #界面构建
+    def _build_ui(self):
+        _c = get_theme_colors()
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet(f"""
+            QScrollArea {{ border: none; background: transparent; }}
+            QScrollBar:vertical {{ width: 8px; background: transparent; margin: 0px; }}
+            QScrollBar::handle:vertical {{
+                background: {_c['border_light']}; border-radius: 4px; min-height: 30px;
+            }}
+            QScrollBar::handle:vertical:hover {{ background: {_c['fg_dim']}; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
+        """)
+
+        content = QWidget()
+        content.setStyleSheet("background: transparent;")
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(34, 28, 34, 28)
+        layout.setSpacing(22)
+
+        layout.addWidget(self._build_header())
+
+        grid = QGridLayout()
+        grid.setSpacing(20)
+        grid.addWidget(self._build_version_card(), 0, 0)
+        grid.addWidget(self._build_contact_card(), 0, 1)
+        grid.addWidget(self._build_device_card(), 1, 0)
+        grid.addWidget(self._build_legal_card(), 1, 1)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        layout.addLayout(grid)
+
+        layout.addStretch()
+
+        back_btn = QPushButton("🔙 返回主菜单")
+        back_btn.setMinimumWidth(160)
+        back_btn.setFixedHeight(46)
+        back_btn.setStyleSheet(self._themed_button_style())
+        back_btn.clicked.connect(lambda: self.app.switchTo(self.app.homeInterface))
+        layout.addWidget(back_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
+
+    def _make_card(self):
+        _c = get_theme_colors()
+        card = QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{
+                background: {_c['bg_alt']};
+                border-radius: 16px;
+                border: none;
+            }}
+        """)
+        return card
+
+    def _card_title(self, text):
+        _c = get_theme_colors()
+        lbl = QLabel(text)
+        lbl.setStyleSheet(
+            f"font-size: 19px; font-weight: 600; color: {_c['fg_bright']};"
+        )
+        return lbl
+
+    def _build_header(self):
+        _c = get_theme_colors()
+        header = QFrame()
+        header.setStyleSheet("""
+            QFrame {
+                background: rgba(100, 181, 246, 0.1);
+                border-radius: 14px;
+                border: none;
+            }
+        """)
+        h = QVBoxLayout(header)
+        h.setContentsMargins(28, 26, 28, 26)
+        h.setSpacing(18)
+
+        major = _get_major_version()
+        title = QLabel()
+        title.setTextFormat(Qt.TextFormat.RichText)
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setText(
+            f'<span style="color:{_c["fg_bright"]}; font-size:64px; '
+            f'font-weight:900; letter-spacing:2px;">Pick</span>'
+            f'<span style="color:#2196F3; font-size:64px; '
+            f'font-weight:900; letter-spacing:2px;">OS</span>'
+            f'<span style="color:{_c["fg_bright"]}; font-size:64px; '
+            f'font-weight:900; margin-left:22px;">&nbsp;{major}</span>'
+        )
+        h.addWidget(title)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(14)
+        btn_row.addStretch()
+
+        check_btn = QPushButton("🔄 检查更新")
+        check_btn.setFixedHeight(44)
+        check_btn.setMinimumWidth(150)
+        check_btn.setStyleSheet(self._themed_button_style())
+        check_btn.clicked.connect(self._on_check_update)
+        btn_row.addWidget(check_btn)
+
+        log_btn = QPushButton("📜 更新日志")
+        log_btn.setFixedHeight(44)
+        log_btn.setMinimumWidth(150)
+        log_btn.setStyleSheet(self._themed_button_style())
+        log_btn.clicked.connect(self._on_view_changelog)
+        btn_row.addWidget(log_btn)
+
+        btn_row.addStretch()
+        h.addLayout(btn_row)
+
+        return header
+
+    def _build_version_card(self):
+        _c = get_theme_colors()
+        card = self._make_card()
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(14)
+
+        layout.addWidget(self._card_title("📦 软件版本"))
+
+        self.default_text_color = _c["fg"]
+        self.version_label = QLabel(f"当前版本：{SYSTEM_VERSION}")
+        self.version_label.setStyleSheet(f"font-size: 16px; color: {_c['fg']};")
+        self.version_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.version_label.mousePressEvent = self.on_version_click
+        layout.addWidget(self.version_label)
+
+        for line in [f"系统名称：{SYSTEM_NAME}", "系统状态：运行中"]:
+            lbl = QLabel(line)
+            lbl.setStyleSheet(f"font-size: 16px; color: {_c['fg']};")
+            layout.addWidget(lbl)
+
+        layout.addStretch()
+        return card
+
+    def _build_contact_card(self):
+        _c = get_theme_colors()
+        card = self._make_card()
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(14)
+
+        layout.addWidget(self._card_title("📬 联系方式"))
+
+        email_lbl = QLabel(f"📧 邮箱：{SYSTEM_CONTACT}")
+        email_lbl.setStyleSheet(f"font-size: 16px; color: {_c['fg']};")
+        email_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(email_lbl)
+
+        gh_lbl = QLabel(
+            f'🐙 GitHub：<a href="https://github.com/wuweijia-star/PickOS" '
+            f'style="color:#64B5F6; text-decoration:none;">'
+            f'github.com/wuweijia-star/PickOS</a>'
+        )
+        gh_lbl.setTextFormat(Qt.TextFormat.RichText)
+        gh_lbl.setOpenExternalLinks(True)
+        gh_lbl.setStyleSheet(f"font-size: 16px; color: {_c['fg']};")
+        layout.addWidget(gh_lbl)
+
+        made_lbl = QLabel("中国制造 · MADE IN CHINA")
+        made_lbl.setStyleSheet(f"font-size: 15px; color: {_c['fg_dim']};")
+        layout.addWidget(made_lbl)
+
+        layout.addStretch()
+        return card
+
+    def _build_device_card(self):
+        _c = get_theme_colors()
+        card = self._make_card()
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(14)
+
+        layout.addWidget(self._card_title("🖥️ 设备信息"))
+
+        self.device_time_label = QLabel("加载中...")
+        self.device_time_label.setTextFormat(Qt.TextFormat.RichText)
+        self.device_time_label.setStyleSheet(f"font-size: 16px; color: {_c['fg']};")
+        self.device_time_label.setWordWrap(True)
+        self.device_time_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        layout.addWidget(self.device_time_label)
+
+        layout.addSpacing(6)
+
+        copyright_lbl = QLabel(COPYRIGHT_UI)
+        copyright_lbl.setStyleSheet(f"font-size: 16px; color: {_c['fg_dim']};")
+        copyright_lbl.setWordWrap(True)
+        layout.addWidget(copyright_lbl)
+
+        layout.addStretch()
+        return card
+
+    def _build_legal_card(self):
+        _c = get_theme_colors()
+        card = self._make_card()
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(14)
+
+        layout.addWidget(self._card_title("⚖️ 法律信息"))
+
+        for name, url, icon in [
+            ("用户协议", EULA_URL, "📄"),
+            ("隐私政策", PRIVACY_URL, "🔒"),
+            ("开源许可（GPLv3）", LICENSE_URL, "⚖️"),
+        ]:
+            btn = QPushButton(f"{icon}  {name}")
+            btn.setFixedHeight(42)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    color: {_c['fg']};
+                    border: none;
+                    border-radius: 8px;
+                    font-size: 16px;
+                    font-weight: 500;
+                    padding-left: 8px;
+                    text-align: left;
+                }}
+                QPushButton:hover {{
+                    background: rgba(100, 181, 246, 0.16);
+                    color: {_c['fg_bright']};
+                }}
+                QPushButton:pressed {{
+                    background: rgba(100, 181, 246, 0.3);
+                }}
+            """)
+            btn.clicked.connect(lambda _, n=name, u=url: self._open_legal(n, u))
+            layout.addWidget(btn)
+
+        layout.addStretch()
+        return card
+
+    #事件处理
+
+    def _open_legal(self, name, url):
+        print(f"[关于] 打开法律文档：{name}")
+        try:
+            dlg = LegalDocumentDialog(self, name, url)
+            dlg.exec()
+        except Exception as e:
+            import traceback
+            print(f"[关于] 打开法律文档失败：{e}")
+            traceback.print_exc()
+            show_toast(self, f"打开法律文档失败：{e}", "error", duration=4000)
+
+    def _on_check_update(self):
+        print("[关于] 点击检查更新")
+        show_toast(self, "正在检查更新，请稍候...", "info", duration=2000)
+
+        def thread():
+            try:
+                hu, ver, log, url = UpdateManager.check_update()
+                print(f"[关于] 检查更新完成 has={hu} ver={ver}")
+                self._check_update_result.emit(
+                    bool(hu), ver or "", log or "", url or "", ""
+                )
+            except Exception as ex:
+                print(f"[关于] 检查更新异常：{ex}")
+                self._check_update_result.emit(False, "", "", "", str(ex))
+
+        threading.Thread(target=thread, daemon=True).start()
+
+    def _apply_check_update_result(self, has_update, ver, log, url, err):
+        print(f"[关于] 应用检查结果 has={has_update} ver={ver} err={err}")
+        if err:
+            show_toast(self, err, "error", duration=5000)
+            return
+        if has_update and url:
+            self._update_window = _NeuUpdateWindow(ver, log, url)
+            self._update_window.show()
+            self._update_window.raise_()
+            self._update_window.activateWindow()
+        elif ver:
+            show_toast(self, f"当前已是最新版本 ({CURRENT_VERSION})", "success")
+        else:
+            show_toast(self, "获取版本信息失败，请稍后再试", "error")
+
+    def _on_view_changelog(self):
+        print("[关于] 点击更新日志")
+        show_toast(self, "正在获取最新更新日志...", "info", duration=2000)
+
+        def thread():
+            try:
+                _, ver, log, _ = UpdateManager.check_update()
+                print(f"[关于] 获取日志完成 ver={ver}")
+                self._changelog_result.emit(ver or "未知", log or "暂无更新日志", "")
+            except Exception as ex:
+                print(f"[关于] 获取日志异常：{ex}")
+                self._changelog_result.emit("", "", str(ex))
+
+        threading.Thread(target=thread, daemon=True).start()
+
+    #之前不小心把这段删了，难怪运行不起来，蠢到我自己了
+    def _apply_changelog_result(self, ver, log, err):
+        print(f"[关于] 应用更新日志 ver={ver} err={err}")
+        if err:
+            show_toast(self, f"获取更新日志失败：{err}", "error", duration=5000)
+            return
+        self._show_changelog(ver, log)
+
+    def _show_changelog(self, version, changelog):
+        _c = get_theme_colors()
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"📜 更新日志 - {version}")
+        dlg.resize(860, 640)
+        dlg.setStyleSheet(DIALOG_STYLE)
+
+        screen = QApplication.primaryScreen().availableGeometry()
+        dlg.move(screen.center() - dlg.rect().center())
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(16)
+
+        title = QLabel(f"最新版本：{version}")
+        title.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {_c['fg']};")
+        layout.addWidget(title)
+
+        browser = QTextBrowser()
+        browser.setOpenExternalLinks(True)
+        try:
+            browser.setMarkdown(changelog or "暂无更新日志")
+        except Exception:
+            browser.setPlainText(changelog or "暂无更新日志")
+        browser.setStyleSheet(f"""
+            QTextBrowser {{
+                background: {_c['bg_alt']};
+                border: 1px solid {_c['border']};
+                border-radius: 10px;
+                color: {_c['fg']};
+                padding: 18px;
+                font-family: "Microsoft YaHei", sans-serif;
+                font-size: 15px;
+            }}
+        """)
+        layout.addWidget(browser)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        open_btn = QPushButton("🌐 在 GitHub 查看完整发布")
+        open_btn.setStyleSheet(self._themed_button_style())
+        open_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(
+                QUrl("https://github.com/wuweijia-star/PickOS/releases")
+            )
+        )
+        btn_row.addWidget(open_btn)
+
+        close_btn = QPushButton("关闭")
+        close_btn.setStyleSheet(self._themed_button_style())
+        close_btn.clicked.connect(dlg.accept)
+        btn_row.addWidget(close_btn)
+
+        layout.addLayout(btn_row)
+        dlg.exec()
 
     def on_version_click(self, event):
         now = time.time()
@@ -16467,11 +17032,11 @@ class AboutInterface(QWidget):
         self.click_count += 1
         self.last_click_time = now
 
-        # 高亮蓝色
-        self.version_label.setStyleSheet(
-            "font-family: 'Microsoft YaHei'; font-size: 24px; "
-            "color: #00BFFF; font-weight: bold;"
-        )
+        if self.version_label is not None:
+            self.version_label.setStyleSheet(
+                "font-size: 16px; color: #00BFFF; font-weight: bold;"
+            )
+
         if self._restore_timer is not None:
             self._restore_timer.stop()
         self._restore_timer = QTimer(self)
@@ -16484,16 +17049,16 @@ class AboutInterface(QWidget):
             self.app.show_heart_animation()
 
     def restore_version_color(self):
-        
-        self.version_label.setStyleSheet(
-            f"font-family: 'Microsoft YaHei'; font-size: 24px; "
-            f"color: {self.default_text_color}; font-weight: bold;"
-        )
+        _c = get_theme_colors()
+        if self.version_label is not None:
+            self.version_label.setStyleSheet(
+                f"font-size: 16px; color: {_c['fg']};"
+            )
         self._restore_timer = None
 
- 
-
     def update_time(self):
+        if self.device_time_label is None:
+            return
         cfg = load_config()
         device_install_ts = cfg.get("install_time", time.time())
 
@@ -16514,12 +17079,11 @@ class AboutInterface(QWidget):
         m_dev = int((total_device % 3600) // 60)
         s_dev = int(total_device % 60)
 
-        text = (
-            f"本次运行时间：{h1}小时{m1}分{s1}秒\n"
-            f"本设备运行总时间：{d_dev}天{h_dev}小时{m_dev}分{s_dev}秒\n"
-            f"PickOS创立时间：{d_sys}天{h_sys}小时{m_sys}分{s_sys}秒"
+        self.device_time_label.setText(
+            f"本次运行时间：{h1} 小时 {m1} 分 {s1} 秒<br><br>"
+            f"本设备运行总时间：{d_dev} 天 {h_dev} 小时 {m_dev} 分 {s_dev} 秒<br><br>"
+            f"PickOS 创立时间：{d_sys} 天 {h_sys} 小时 {m_sys} 分 {s_sys} 秒"
         )
-        self.time_label.setText(text)
 
     def on_destroy(self):
         if self._restore_timer is not None:
@@ -16529,10 +17093,8 @@ class AboutInterface(QWidget):
             self.timer.stop()
 
 # 新手引导
-
-
 class _HelloWidget(QWidget):
-    """苹果风格 Hello 文字动画：逐字从下方滑入 + 淡入，单色（符合新拟物）"""
+    """Hello文字动画"""
     COLOR = "#5a6b8c"     
     CHARS = ["H", "e", "l", "l", "o"]
 
@@ -16710,6 +17272,88 @@ class _HelloStage(QWidget):
         self.next_btn.setVisible(True)
         self._btn_anim = _fade_in_widget(self.next_btn, 600)
 
+class _AgreementStage(QWidget):
+    """用户协议与隐私政策同意阶段"""
+
+    def __init__(self, on_agree, on_decline):
+        super().__init__()
+        self.setStyleSheet("background:transparent;")
+        self.on_agree = on_agree
+        self.on_decline = on_decline
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 30, 0, 40)
+        layout.setSpacing(20)
+
+        self.tip_card = _NeuTipCard(
+            "欢迎使用 PickOS\n"
+            "请认真阅读并同意遵守《用户协议》与《隐私政策》\n"
+            "点击下方按钮查看具体内容",
+            font_size=15,
+        )
+        self.tip_card.setFixedSize(780, 200)
+
+        layout.addStretch(1)
+        layout.addWidget(self.tip_card, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # 查看文档按钮行
+        view_row = QHBoxLayout()
+        view_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        view_row.setSpacing(40)
+
+        self.eula_btn = self._make_link_button("查看用户协议")
+        self.eula_btn.clicked.connect(
+            lambda: self._open_doc("用户协议", EULA_URL)
+        )
+        view_row.addWidget(self.eula_btn)
+
+        self.privacy_btn = self._make_link_button("查看隐私政策")
+        self.privacy_btn.clicked.connect(
+            lambda: self._open_doc("隐私政策", PRIVACY_URL)
+        )
+        view_row.addWidget(self.privacy_btn)
+
+        layout.addLayout(view_row)
+        layout.addStretch(1)
+
+        # 同意 / 拒绝
+        btn_row = QHBoxLayout()
+        btn_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        btn_row.setSpacing(60)
+
+        self.agree_btn = _make_round_neu_button("同意", 180, 28)
+        self.agree_btn.clicked.connect(self.on_agree)
+        btn_row.addWidget(self.agree_btn)
+
+        self.decline_btn = _make_round_neu_button("拒绝", 180, 28)
+        self.decline_btn.clicked.connect(self.on_decline)
+        btn_row.addWidget(self.decline_btn)
+
+        layout.addLayout(btn_row)
+
+    @staticmethod
+    def _make_link_button(text):
+        btn = _NeuButton(text)
+        btn.setFixedSize(300, 110)
+        btn._radius = 28.0
+        btn._blur = 8
+        btn._distance = 4
+        btn._cache = None
+        btn._font.setPointSize(18)
+        return btn
+
+    def _open_doc(self, name, url):
+        try:
+            dlg = LegalDocumentDialog(self, name, url)
+            dlg.exec()
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"打开{name}失败：{e}")
+
+    def start(self):
+        _animate_stage_enter(
+            self.tip_card,
+            [self.eula_btn, self.privacy_btn, self.agree_btn, self.decline_btn],
+        )
 
 class _ShortcutStage(QWidget):
     def __init__(self, on_yes, on_no):
@@ -16892,6 +17536,8 @@ class OnboardingWindow(QWidget):
         self.main_window = main_window
         self._on_finish_callback = on_finish
         self._closing = False
+        self._committed = False
+        self._agreed = False
         self._active_anims = []
         self._current_index = -1
 
@@ -16913,6 +17559,9 @@ class OnboardingWindow(QWidget):
         self.container.setStyleSheet("background-color:#e0e5ec;")
 
         self.hello_stage = _HelloStage(self._on_hello_next)
+        self.agreement_stage = _AgreementStage(   
+            self._on_agreement_agree, self._on_agreement_decline
+        )
         self.shortcut_stage = _ShortcutStage(self._on_shortcut_yes, self._on_shortcut_no)
         self.class_stage = _ClassStage(self._on_class_pick, self._on_class_skip)
         self.subject_stage = _SubjectStage(self._on_subject_config, self._on_subject_skip)
@@ -16920,6 +17569,7 @@ class OnboardingWindow(QWidget):
 
         self.stages = [
             self.hello_stage,
+            self.agreement_stage,                 
             self.shortcut_stage,
             self.class_stage,
             self.subject_stage,
@@ -16993,12 +17643,27 @@ class OnboardingWindow(QWidget):
     def _on_hello_next(self):
         self._switch_to(1)
 
+    def _on_agreement_agree(self):
+        self._agreed = True
+        self._switch_to(2)                         
+
+    def _on_agreement_decline(self):
+        ret = QMessageBox.question(
+            self, "提示",
+            "必须同意《用户协议》与《隐私政策》才能使用 PickOS。\n\n"
+            "是否退出？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if ret == QMessageBox.StandardButton.Yes:
+            self.close()
+
     def _on_shortcut_yes(self):
         self._create_desktop_shortcut()
-        self._switch_to(2)
+        self._switch_to(3)
 
     def _on_shortcut_no(self):
-        self._switch_to(2)
+        self._switch_to(3)
 
     def _on_class_pick(self):
         """选择班级名单"""
@@ -17034,11 +17699,11 @@ class OnboardingWindow(QWidget):
             return
 
        
-        self._switch_to(3)
+        self._switch_to(4)
 
     def _on_class_skip(self):
         """用户点击稍后配置直接进入科目设置"""
-        self._switch_to(3)
+        self._switch_to(4)
 
     def _on_subject_config(self):
         """打开科目管理弹窗，关闭后进入密码阶段"""
@@ -17047,11 +17712,11 @@ class OnboardingWindow(QWidget):
             dlg.exec()
         except Exception as e:
             QMessageBox.warning(self, "错误", f"打开科目设置失败：{e}")
-        self._switch_to(4)
+        self._switch_to(5)
 
     def _on_subject_skip(self):
         """跳过后直接进入密码阶段"""
-        self._switch_to(4)
+        self._switch_to(5)
 
     def _on_password_yes(self):
         self._open_password_settings()
@@ -17096,7 +17761,7 @@ class OnboardingWindow(QWidget):
             # 检查是否已经存在快捷方式
             if os.path.exists(target_path):
                 show_toast(self, "桌面上已存在 PickOS 快捷方式，无需重复创建", "info")
-                return  # 直接结束，不往下覆盖
+                return  
 
             # 区分打包与源码环境
             if getattr(sys, "frozen", False):
@@ -17109,7 +17774,7 @@ class OnboardingWindow(QWidget):
                 script_path = os.path.abspath(__file__)
                 arguments = f'"{script_path}"'
 
-            #  使用 win32com 原生创建快捷方式
+           
             try:
                 import win32com.client
             except ImportError:
@@ -17122,7 +17787,7 @@ class OnboardingWindow(QWidget):
             shortcut.Arguments = arguments
             shortcut.WorkingDirectory = work_dir
             shortcut.IconLocation = f"{exe_path},0"
-            shortcut.Description = "PickOS 班级管理系统"
+            shortcut.Description = SYSTEM_NAME
             shortcut.Save()
 
             self._show_shortcut_success_tip()
@@ -17155,7 +17820,6 @@ class OnboardingWindow(QWidget):
         lay.addWidget(lbl)
 
         lay.addStretch()
-
       
         ok_btn = _NeuButton("确定")
         ok_btn.setFixedSize(220, 100)
@@ -17169,15 +17833,12 @@ class OnboardingWindow(QWidget):
 
         dlg.exec()
 
+
     # 结束引导
     def _finish(self):
         if self._closing:
             return
         self._closing = True
-
-        cfg = load_config()
-        cfg["onboarding_completed"] = True
-        save_config(cfg)
 
         eff = QGraphicsOpacityEffect(self.container)
         self.container.setGraphicsEffect(eff)
@@ -17192,20 +17853,29 @@ class OnboardingWindow(QWidget):
         self._close_anim = anim
 
     def _do_close(self):
+        
         self.close()
+
+    def _commit_finish(self):
+        """窗口完全关闭后才写配置"""
+        if self._committed:
+            return
+        self._committed = True
+
+        if not self._agreed:
+            QApplication.quit()
+            return
+
+        cfg = load_config()
+        cfg["onboarding_completed"] = True
+        save_config(cfg)
+
         if self._on_finish_callback:
             self._on_finish_callback()
 
     def closeEvent(self, event):
-      
-        if not self._closing:
-            self._closing = True
-            cfg = load_config()
-            cfg["onboarding_completed"] = True
-            save_config(cfg)
-            if self._on_finish_callback:
-                self._on_finish_callback()
         super().closeEvent(event)
+        QTimer.singleShot(0, self._commit_finish)
 
 # 程序入口
 if __name__ == "__main__":
