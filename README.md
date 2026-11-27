@@ -6,15 +6,17 @@
 
 > 一款面向中学班主任 / 班干部的班级积分与成绩管理工具。
 
-<div align="center">
-  <img src="assets/demo.gif" width="80%" alt="PickOS 演示动图" />
-</div>
+
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![PyQt6](https://img.shields.io/badge/PyQt6-6.5+-green)
 ![License](https://img.shields.io/badge/License-GPLv3-orange)
 
 [![Download](https://img.shields.io/github/v/release/wuweijia-star/PickOS?label=下载最新版&style=for-the-badge&color=2ea44f)](https://github.com/wuweijia-star/PickOS/releases/latest)
+
+<div align="center">
+  <img src="assets/demo.gif" width="80%" alt="PickOS 演示动图" />
+</div>
 
 PickOS 完全离线运行，所有数据均保存在本机 `user/` 目录中，不上传任何服务器。
 
