@@ -6,6 +6,10 @@
 
 > 一款面向中学班主任 / 班干部的班级积分与成绩管理工具。
 
+<div align="center">
+  <img src="assets/demo.gif" width="80%" alt="PickOS 演示动图" />
+</div>
+
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![PyQt6](https://img.shields.io/badge/PyQt6-6.5+-green)
 ![License](https://img.shields.io/badge/License-GPLv3-orange)
@@ -97,6 +101,17 @@ PickOS/
 | `user/data/班级积分记录.csv` | 积分原始记录 |
 | `user/data/notes.json` | 首页便签 |
 
+## ❓ 常见问题 (FAQ)
+
+**1. 换电脑了，怎么把数据迁移过去？**
+答：直接把你旧电脑上整个 `user` 文件夹（包含所有名单、成绩和积分）复制到新电脑的 PickOS 目录下即可。
+
+**2. 为什么 Windows 系统/杀毒软件提示风险或误报？**
+答：本软件由开源代码和 PyQt6 打包，无任何恶意行为。由于未购买昂贵的商业数字签名证书，部分安全软件（如 360、火绒）可能会误报。请在杀毒软件中将本软件添加为信任即可。
+
+**3. 软件需要联网吗？会泄露学生隐私吗？**
+答：完全离线运行！除了您主动点击“检查更新”时会访问 GitHub 接口外，软件没有任何网络请求，所有数据仅保存在您本地电脑中。
+
 ## ⚖️ 开源协议
 
 本项目采用 **GNU General Public License v3.0** 开源。
@@ -125,6 +140,8 @@ PickOS/
 ## 🐛 反馈与贡献
 
 - 提交 Issue：[GitHub Issues](https://github.com/wuweijia-star/PickOS/issues)
+- 贡献指南：[CONTRIBUTING.md](CONTRIBUTING.md)
+- 安全策略：[SECURITY.md](SECURITY.md)
 - 提交 PR：欢迎，但请遵循 GPLv3
 - 提交前建议先搜索是否已有相似 Issue
 
