@@ -1,0 +1,46 @@
+name: 🐛 Bug 反馈
+description: 报告一个错误以帮助我们改进 PickOS
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **⚠️ 隐私警告：请勿在此上传真实的班级名单和成绩截图！**
+  - type: input
+    id: os
+    attributes:
+      label: 操作系统
+      description: 你使用的操作系统是什么？
+      placeholder: 例如：Windows 11 / Windows 10
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: PickOS 版本
+      description: 你当前使用的 PickOS 版本号
+      placeholder: 例如：v1.2.0
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: 请描述如何重现这个 Bug
+      placeholder: |
+        1. 打开软件，进入 '...' 页面
+        2. 点击 '...'
+        3. 出现错误
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+      description: 你期望发生什么？
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志或截图
+      description: 如果有报错日志或截图，请粘贴在这里（请自行脱敏处理）
