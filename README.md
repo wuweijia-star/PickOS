@@ -14,7 +14,7 @@
 [![Download](https://img.shields.io/github/v/release/wuweijia-star/PickOS?label=下载最新版&style=for-the-badge&color=2ea44f)](https://github.com/wuweijia-star/PickOS/releases/latest)
 
 <div align="center">
-  <video src="https://github.com/wuweijia-star/PickOS/releases/download/v6.5.0.101/demo.mp4" controls width="80%"></video>
+  <img src="assets/demo.gif" width="80%" alt="PickOS 演示动图" />
 </div>
 
 PickOS 完全离线运行，所有数据均保存在本机 `user/` 目录中，不上传任何服务器。
@@ -180,7 +180,7 @@ PickOS/
 [![Download](https://img.shields.io/github/v/release/wuweijia-star/PickOS?label=Download%20Latest&style=for-the-badge&color=2ea44f)](https://github.com/wuweijia-star/PickOS/releases/latest)
 
 <div align="center">
-  <video src="https://github.com/wuweijia-star/PickOS/releases/download/v6.5.0.101/demo.mp4" controls width="80%"></video>
+  <img src="assets/demo.gif" width="80%" alt="PickOS 演示动图" />
 </div>
 
 PickOS runs fully offline. All data is stored in the local `user/` directory and is never uploaded to any server.
