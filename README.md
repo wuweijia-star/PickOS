@@ -6,16 +6,18 @@
 
 > 一款面向中学班主任 / 班干部的班级积分与成绩管理工具。
 
-
-
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![PyQt6](https://img.shields.io/badge/PyQt6-6.5+-green)
 ![License](https://img.shields.io/badge/License-GPLv3-orange)
+![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
 [![Download](https://img.shields.io/github/v/release/wuweijia-star/PickOS?label=下载最新版&style=for-the-badge&color=2ea44f)](https://github.com/wuweijia-star/PickOS/releases/latest)
 
 <div align="center">
-  <img src="assets/demo.gif" width="80%" alt="PickOS 演示动图" />
+  <video width="80%" controls>
+    <source src="https://github.com/wuweijia-star/PickOS/releases/download/v6.5.0.101/demo.mp4" type="video/mp4">
+    您的浏览器不支持视频播放，请点击<a href="https://github.com/wuweijia-star/PickOS/releases/download/v6.5.0.101/demo.mp4">下载视频</a>查看。
+  </video>
 </div>
 
 PickOS 完全离线运行，所有数据均保存在本机 `user/` 目录中，不上传任何服务器。
@@ -84,6 +86,11 @@ PickOS/
 ├── requirements.txt      # 依赖清单
 ├── LICENSE               # GPLv3 协议
 ├── README.md
+├── EULA.md               # 用户协议
+├── PRIVACY.md            # 隐私政策
+├── CONTRIBUTING.md       # 贡献指南
+├── SECURITY.md           # 安全策略
+├── assets/               # 演示图片/动图等资源
 ├── dist/                 # 打包后生成的运行目录（包含所有依赖）
 ├── Output/               # Inno Setup 生成的 .exe 安装包目录
 └── user/                 # 首次启动后自动生成（已加入 .gitignore）
@@ -108,10 +115,14 @@ PickOS/
 **1. 换电脑了，怎么把数据迁移过去？**
 答：直接把你旧电脑上整个 `user` 文件夹（包含所有名单、成绩和积分）复制到新电脑的 PickOS 目录下即可。
 
-**2. 为什么 Windows 系统/杀毒软件提示风险或误报？**
-答：本软件由开源代码和 PyQt6 打包，无任何恶意行为。由于未购买昂贵的商业数字签名证书，部分安全软件（如 360、火绒）可能会误报。请在杀毒软件中将本软件添加为信任即可。
+**2. 为什么 Windows 会弹出“已保护你的电脑”拦截提示？**
+答：由于本软件由个人开源开发，尚未购买昂贵的商业数字签名证书，Windows Defender SmartScreen 可能会将新发布的文件识别为“未知发布者”。
+**解决办法**：在弹窗中点击 **“更多信息”**，然后点击 **“仍要运行”** 即可。未来的版本我们正在尝试接入开源签名（SignPath），感谢理解。
 
-**3. 软件需要联网吗？会泄露学生隐私吗？**
+**3. 为什么杀毒软件（如 360、火绒）会误报？**
+答：本软件通过开源代码和 PyQt6 打包，无任何恶意行为。由于打包工具和缺乏商业签名的特性，部分严格的杀毒软件可能会误报。如遇此情况，请在杀毒软件中将本软件添加为信任。
+
+**4. 软件需要联网吗？会泄露学生隐私吗？**
 答：完全离线运行！除了您主动点击“检查更新”时会访问 GitHub 接口外，软件没有任何网络请求，所有数据仅保存在您本地电脑中。
 
 ## ⚖️ 开源协议
@@ -167,8 +178,16 @@ PickOS/
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![PyQt6](https://img.shields.io/badge/PyQt6-6.5+-green)
 ![License](https://img.shields.io/badge/License-GPLv3-orange)
+![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
 [![Download](https://img.shields.io/github/v/release/wuweijia-star/PickOS?label=Download%20Latest&style=for-the-badge&color=2ea44f)](https://github.com/wuweijia-star/PickOS/releases/latest)
+
+<div align="center">
+  <video width="80%" controls>
+    <source src="https://github.com/wuweijia-star/PickOS/releases/download/v6.5.0.101/demo.mp4" type="video/mp4">
+    您的浏览器不支持视频播放，请点击<a href="https://github.com/wuweijia-star/PickOS/releases/download/v6.5.0.101/demo.mp4">下载视频</a>查看。
+  </video>
+</div>
 
 PickOS runs fully offline. All data is stored in the local `user/` directory and is never uploaded to any server.
 
@@ -236,6 +255,11 @@ PickOS/
 ├── requirements.txt      # Dependency list
 ├── LICENSE               # GPLv3 license
 ├── README.md
+├── EULA.md               # End User License Agreement
+├── PRIVACY.md            # Privacy Policy
+├── CONTRIBUTING.md       # Contributing Guidelines
+├── SECURITY.md           # Security Policy
+├── assets/               # Demo images/gifs and other resources
 ├── dist/                 # Build output directory (contains all dependencies)
 ├── Output/               # Inno Setup .exe installer output directory
 └── user/                 # Auto-generated on first launch (already in .gitignore)
@@ -254,6 +278,21 @@ All data is stored in the `user/` folder inside the **program directory**, and i
 | `user/data/班级名单.xlsx` | Student roster |
 | `user/data/班级积分记录.csv` | Raw points records |
 | `user/data/notes.json` | Dashboard sticky notes |
+
+## ❓ FAQ
+
+**1. How do I migrate my data to a new computer?**
+Simply copy the entire `user` folder (containing rosters, grades, and points) from the old computer to the PickOS directory on the new computer.
+
+**2. Why does Windows show a "Windows protected your PC" warning?**
+Because this is an open-source project, we have not purchased a commercial code-signing certificate. Windows Defender SmartScreen may flag the new executable as an "unknown publisher".
+**Solution**: Click **"More info"** in the warning dialog and then click **"Run anyway"**. We are currently applying for free open-source code signing via SignPath to resolve this in future releases.
+
+**3. Why do antivirus programs (like 360, Huorong) falsely flag the software?**
+The software is packaged using open-source code and PyQt6 with zero malicious behavior. Due to the packaging nature and lack of commercial signatures, strict antivirus engines may falsely flag it. Please add the software to your antivirus whitelist/trust list.
+
+**4. Does the software need the internet? Will it leak student privacy?**
+It runs 100% offline! Except when you manually click "Check for Updates" (which accesses the GitHub API), there are no network requests. All data stays strictly on your local computer.
 
 ## ⚖️ License
 
@@ -283,6 +322,8 @@ See [LICENSE](LICENSE) for the full license.
 ## 🐛 Feedback & Contributing
 
 - Submit an Issue: [GitHub Issues](https://github.com/wuweijia-star/PickOS/issues)
+- Contributing Guidelines: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Security Policy: [SECURITY.md](SECURITY.md)
 - Submit a PR: Welcome, but please comply with GPLv3
 - Please search for existing similar issues before submitting
 
